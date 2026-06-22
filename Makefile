@@ -774,3 +774,89 @@ real-hardware-test:
 
 bios-uefi-test:
 	@echo "See real_hardware_test.md for BIOS/UEFI compatibility steps."
+
+# =============================================================================
+# AArch64 / ARM bare-metal target - Tessera ARM port (Issue #1)
+# -----------------------------------------------------------------------------
+# Build:                 make arm
+# Clean:                 make arm-clean
+# Use a GNU toolchain:   make arm CROSS_COMPILE=aarch64-none-elf-
+#                        make arm CROSS_COMPILE=aarch64-linux-gnu-
+#
+# By default this uses LLVM/clang, which is a native cross-compiler: no
+# separate aarch64 GCC is required. See docs/build-arm.md for details.
+# =============================================================================
+
+ARCH_ARM_DIR  = arch/arm64
+ARM_BUILD_DIR = $(BUILD_DIR)/arm
+ARM_CPU       = cortex-a72
+
+# --- Toolchain selection --------------------------------------------------
+# If CROSS_COMPILE is set, use that GNU toolchain ($(CROSS_COMPILE)gcc, etc).
+# Otherwise fall back to clang/lld/llvm-objcopy with an explicit target.
+ifeq ($(strip $(CROSS_COMPILE)),)
+  ARM_CC            = clang
+  ARM_TARGET_FLAGS  = --target=aarch64-none-elf
+  ARM_LD            = ld.lld
+  ARM_OBJCOPY       = llvm-objcopy
+else
+  ARM_CC            = $(CROSS_COMPILE)gcc
+  ARM_TARGET_FLAGS  =
+  ARM_LD            = $(CROSS_COMPILE)ld
+  ARM_OBJCOPY       = $(CROSS_COMPILE)objcopy
+endif
+
+ARM_CFLAGS  = $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding \
+              -mgeneral-regs-only -fno-stack-protector -fno-pic -fno-pie \
+              -Wall -Wextra -std=c11 -O2 -g -Iinclude/ -I$(ARCH_ARM_DIR)
+ARM_ASFLAGS = $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding -g -Iinclude/
+ARM_LDSCRIPT = $(ARCH_ARM_DIR)/kernel.ld
+ARM_LDFLAGS  = -T $(ARM_LDSCRIPT)
+
+# Sources: C + asm under arch/arm64, plus the boot entry stub in boot/.
+ARM_C_SOURCES   = $(wildcard $(ARCH_ARM_DIR)/*.c)
+ARM_ASM_SOURCES = $(wildcard $(ARCH_ARM_DIR)/*.S) $(BOOT_DIR)/start.S
+ARM_OBJECTS = $(patsubst %.c,$(ARM_BUILD_DIR)/%.o,$(notdir $(ARM_C_SOURCES))) \
+              $(patsubst %.S,$(ARM_BUILD_DIR)/%.o,$(notdir $(ARM_ASM_SOURCES)))
+
+ARM_KERNEL_ELF = $(ARM_BUILD_DIR)/kernel8.elf
+ARM_KERNEL_IMG = $(ARM_BUILD_DIR)/kernel8.img
+
+arm: $(ARM_KERNEL_IMG)
+	@echo "==> ARM build complete:"
+	@echo "    ELF: $(ARM_KERNEL_ELF)"
+	@echo "    IMG: $(ARM_KERNEL_IMG)"
+	@readelf -h $(ARM_KERNEL_ELF) | grep -E 'Class|Machine|Entry'
+
+$(ARM_BUILD_DIR):
+	mkdir -p $(ARM_BUILD_DIR)
+
+# C sources (arch/arm64/*.c)
+$(ARM_BUILD_DIR)/%.o: $(ARCH_ARM_DIR)/%.c | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_CFLAGS) -c $< -o $@
+
+# Arch assembly (arch/arm64/*.S)
+$(ARM_BUILD_DIR)/%.o: $(ARCH_ARM_DIR)/%.S | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -c $< -o $@
+
+# Boot entry stub (boot/start.S)
+$(ARM_BUILD_DIR)/start.o: $(BOOT_DIR)/start.S | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -c $< -o $@
+
+# Link the kernel ELF (no C runtime, no standard libraries).
+$(ARM_KERNEL_ELF): $(ARM_OBJECTS) $(ARM_LDSCRIPT)
+	$(ARM_LD) $(ARM_LDFLAGS) -o $@ $(ARM_OBJECTS)
+
+# Flatten to a raw image the Pi firmware can load.
+$(ARM_KERNEL_IMG): $(ARM_KERNEL_ELF)
+	$(ARM_OBJCOPY) -O binary $< $@
+
+arm-clean:
+	rm -rf $(ARM_BUILD_DIR)
+
+# Install the default (LLVM) ARM toolchain on Ubuntu/Debian.
+arm-install-deps:
+	sudo apt-get update
+	sudo apt-get install -y clang lld llvm binutils
+
+.PHONY: arm arm-clean arm-install-deps
