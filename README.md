@@ -108,6 +108,22 @@ design - the years of work - is unchanged.
 
 ---
 
+## Building
+
+Tessera builds for AArch64 with LLVM/clang (no separate cross-GCC required):
+
+```sh
+make arm-install-deps   # clang, lld, llvm (Ubuntu/Debian)
+make arm                # -> build/arm/kernel8.img (+ kernel8.elf)
+```
+
+A GNU toolchain works too: `make arm CROSS_COMPILE=aarch64-none-elf-`. See
+[`docs/build-arm.md`](./docs/build-arm.md) for details, flags, and how to run
+the image. The legacy x86 IKOS build remains available via the other `make`
+targets.
+
+---
+
 ## Status
 
 **Pre-alpha - ARM port in progress.** x86-specific boot and hardware layers are
