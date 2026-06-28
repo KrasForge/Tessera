@@ -1,11 +1,17 @@
 /* IKOS I/O Port Access Functions
- * 
+ *
  * Low-level I/O port access functions for IKOS kernel.
  * These functions provide access to x86 I/O ports for device drivers.
+ *
+ * Issue #6: this header is x86-only.  It must not be included by any
+ * source file compiled for the AArch64 (ARM) target.
  */
 
 #ifndef IO_H
 #define IO_H
+
+/* Guard: x86 I/O-port instructions do not exist on AArch64. */
+#ifndef __aarch64__
 
 #include <stdint.h>
 
@@ -87,4 +93,5 @@ static inline void outsl(uint16_t port, const void* buffer, uint32_t count) {
                      : "d"(port));
 }
 
+#endif /* !__aarch64__ */
 #endif /* IO_H */
