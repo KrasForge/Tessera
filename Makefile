@@ -1236,6 +1236,42 @@ test-arm-latency: | $(ARM_BUILD_DIR)
 	      $(ARM_LAT_TEST_SRCS) -o $(ARM_LAT_TEST_BIN)
 	$(ARM_LAT_TEST_BIN)
 
+# ---- M5: plugin ABI (issue #23) -------------------------------------------
+# Plugins use floating point for DSP, so they are built WITH FP (no
+# -mgeneral-regs-only) and against only the self-contained plugin ABI header.
+PLUGIN_CFLAGS = -mcpu=$(ARM_CPU) -ffreestanding -fPIC -O2 -std=c11 -Wall -Wextra
+EXAMPLE_PLUGIN_SRC = plugins/example_gain/gain.c
+PLUGIN_SYMS = plugin_abi_version plugin_init plugin_process_block \
+              plugin_set_param plugin_destroy
+
+# Host semantic test: drive the reference plugin through the ABI.
+test-arm-plugin-abi: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Iinclude tests/arm64/plugin_abi_test.c $(EXAMPLE_PLUGIN_SRC) \
+	      -o $(ARM_BUILD_DIR)/plugin_abi_test -lm
+	$(ARM_BUILD_DIR)/plugin_abi_test
+
+# Acceptance: the reference plugin builds with the cross toolchain against ONLY
+# plugin_abi.h (copied alone, proving no kernel headers are needed) and produces
+# a valid AArch64 ELF exporting all five ABI symbols.
+test-arm-plugin-elf: | $(ARM_BUILD_DIR)
+	rm -rf $(ARM_BUILD_DIR)/plugin_inc
+	mkdir -p $(ARM_BUILD_DIR)/plugin_inc
+	cp include/plugin_abi.h $(ARM_BUILD_DIR)/plugin_inc/
+	$(ARM_CC) $(PLUGIN_CFLAGS) -I$(ARM_BUILD_DIR)/plugin_inc \
+	    -c $(EXAMPLE_PLUGIN_SRC) -o $(ARM_BUILD_DIR)/gain.o
+	@echo "--- ELF header ---"
+	@$(CROSS_COMPILE)readelf -h $(ARM_BUILD_DIR)/gain.o
+	@$(CROSS_COMPILE)readelf -h $(ARM_BUILD_DIR)/gain.o | grep -q 'AArch64' \
+	  && echo "machine: AArch64 OK" \
+	  || { echo "FAILED: not an AArch64 ELF"; exit 1; }
+	@for s in $(PLUGIN_SYMS); do \
+	  $(CROSS_COMPILE)readelf -sW $(ARM_BUILD_DIR)/gain.o | grep -q " $$s$$" \
+	    && echo "symbol: $$s OK" \
+	    || { echo "FAILED: missing ABI symbol $$s"; exit 1; }; \
+	done
+	@echo "plugin ABI ELF test PASSED"
+
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
 # only leave the CPU by being preempted.  Verifies priority preemption,
