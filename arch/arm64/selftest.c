@@ -19,6 +19,8 @@
 #include "i2s.h"
 #include "audio_stream.h"
 #include "sine_gen.h"
+#include "timer.h"
+#include "gic.h"
 #include "uart_pl011.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -354,4 +356,31 @@ void m3_sine_selftest(void)
 
     audio_sine_stop();
     uart_puts("=== M3 sine-generator self-test complete ===\r\n\r\n");
+}
+
+/* M4 (issue #19): GIC + generic timer.  Run the 1 kHz tick for a short window
+ * and confirm the count, then disable it so the rest of boot is undisturbed. */
+void m4_timer_selftest(void)
+{
+    uart_puts("=== M4 GIC + timer self-test (issue #19) ===\r\n");
+
+    gic_init();
+    timer_init(1000);
+    __asm__ volatile("msr daifclr, #2");        /* unmask IRQ */
+
+    uint64_t freq, start, now;
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(start));
+    do {
+        __asm__ volatile("mrs %0, cntpct_el0" : "=r"(now));
+    } while (now - start < freq / 10);          /* 100 ms */
+
+    uint64_t ticks = timer_ticks();
+    timer_stop();
+    __asm__ volatile("msr daifset, #2");         /* mask IRQ again */
+
+    uart_printf("timer : ticks in 100 ms ............ %s (%u, expect ~100)\r\n",
+                OKBAD(ticks >= 90 && ticks <= 110), (unsigned)ticks);
+
+    uart_puts("=== M4 GIC + timer self-test complete ===\r\n\r\n");
 }

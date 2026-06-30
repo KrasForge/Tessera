@@ -61,6 +61,9 @@ extern char vectors[];
 void arm64_user_fault(struct trapframe *tf);
 /* Provided strongly by arch/arm64/sched.c (weak default below). */
 void arm64_fpu_trap(struct trapframe *tf);
+/* IRQ dispatcher (arch/arm64/irq.c); weak default below for harnesses that
+ * do not link the GIC/timer. */
+void arm64_irq(struct trapframe *tf);
 
 /* Recoverable-trap hook used by exceptions_selftest(). */
 static volatile int      g_expect_trap;
@@ -120,7 +123,7 @@ void arm64_exception(struct trapframe *tf, unsigned long kind)
 
     /* IRQ / FIQ / SError have no useful EC; identify them by vector slot. */
     unsigned type = kind & 3;   /* 0=sync 1=IRQ 2=FIQ 3=SError */
-    if (type == 1) { uart_puts("\r\n[exception] unexpected IRQ\r\n");    dump(tf, ec, kind); halt(); }
+    if (type == 1) { arm64_irq(tf); return; }   /* dispatch and resume */
     if (type == 2) { uart_puts("\r\n[exception] unexpected FIQ\r\n");    dump(tf, ec, kind); halt(); }
     if (type == 3) { uart_puts("\r\n[exception] SError\r\n");           dump(tf, ec, kind); halt(); }
 
@@ -186,6 +189,14 @@ __attribute__((weak)) void arm64_user_fault(struct trapframe *tf)
  * enables FP and lazily saves/restores NEON state.  The weak version does
  * nothing (no FP is used in the minimal harnesses). */
 __attribute__((weak)) void arm64_fpu_trap(struct trapframe *tf)
+{
+    (void)tf;
+}
+
+/* Weak default IRQ dispatcher; arch/arm64/irq.c provides the strong version
+ * that drives the GIC.  Harnesses without the GIC never enable IRQs, so this
+ * is unreachable there. */
+__attribute__((weak)) void arm64_irq(struct trapframe *tf)
 {
     (void)tf;
 }

@@ -108,6 +108,22 @@ jobs:
       - name: Sine-generator API smoke on QEMU virt (no faults)
         run: make test-arm-sine-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  interrupt-tests:
+    name: M4 interrupts - GIC + generic timer on QEMU virt
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: GIC + 1 kHz timer interrupt test on QEMU virt
+        run: make test-arm-timer-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
