@@ -17,6 +17,7 @@
 #include "usermode.h"
 #include "sched.h"
 #include "i2s.h"
+#include "audio_stream.h"
 #include "uart_pl011.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -301,4 +302,35 @@ void m3_audio_selftest(void)
     i2s_play_tone(440, 480);   /* ~10 ms of 440 Hz */
     uart_puts("audio : played 440 Hz tone (audible on a PCM5102 DAC)\r\n");
     uart_puts("=== M3 audio self-test complete ===\r\n\r\n");
+}
+
+/* M3 (issue #17): DMA double-buffered streaming. */
+static uint32_t g_stream_rate = 48000;
+
+static void selftest_sine_fill(int16_t *dst, uint32_t frames, void *ctx)
+{
+    static uint32_t phase;
+    uint32_t rate = *(uint32_t *)ctx;
+    for (uint32_t i = 0; i < frames; i++) {
+        int16_t s = i2s_sine(&phase, 440, rate);
+        dst[2 * i] = s;
+        dst[2 * i + 1] = s;
+    }
+}
+
+void m3_dma_audio_selftest(void)
+{
+    uart_puts("=== M3 DMA-audio self-test (issue #17) ===\r\n");
+
+    audio_stream_t s;
+    audio_stream_init(&s, 48000, 256, selftest_sine_fill, &g_stream_rate);
+    uart_puts("dma   : I2S + DMA ring configured (256-frame double buffer)\r\n");
+
+    audio_stream_start(&s);
+    for (int i = 0; i < 8; i++)
+        audio_stream_service(&s);   /* refill as the DMA drains the ring */
+    audio_stream_stop(&s);
+
+    uart_puts("dma   : streamed via DMA ring (continuous on a PCM5102 DAC)\r\n");
+    uart_puts("=== M3 DMA-audio self-test complete ===\r\n\r\n");
 }

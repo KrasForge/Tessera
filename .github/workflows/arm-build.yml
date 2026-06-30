@@ -96,6 +96,12 @@ jobs:
       - name: I2S API smoke on QEMU virt (no faults)
         run: make test-arm-i2s-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: DMA double-buffer host unit tests (ASan + UBSan)
+        run: make test-arm-audio
+
+      - name: DMA-audio API smoke on QEMU virt (no faults)
+        run: make test-arm-audio-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04

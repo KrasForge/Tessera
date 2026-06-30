@@ -1077,6 +1077,50 @@ test-arm-i2s-qemu: | $(ARM_BUILD_DIR)
 	  && echo "QEMU virt I2S smoke test PASSED" \
 	  || { echo "QEMU virt I2S smoke test FAILED"; exit 1; }
 
+# Host unit tests for DMA audio streaming (issue #17).
+ARM_AUDIO_TEST_SRCS = tests/arm64/audio_test.c drivers/dma.c drivers/audio.c
+ARM_AUDIO_TEST_BIN  = $(ARM_BUILD_DIR)/audio_test
+
+test-arm-audio: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -Iinclude \
+	      $(ARM_AUDIO_TEST_SRCS) -o $(ARM_AUDIO_TEST_BIN)
+	$(ARM_AUDIO_TEST_BIN)
+
+# DMA-audio API smoke test on QEMU 'virt' (issue #17): full streaming path
+# against scratch-mapped peripheral registers, MMU enabled, no faults.
+VIRT_AUDIO_ELF  = $(ARM_BUILD_DIR)/virt_audio.elf
+VIRT_AUDIO_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                  $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/exceptions.c \
+                  $(ARCH_ARM_DIR)/string.c drivers/dma.c drivers/audio.c \
+                  drivers/i2s.c drivers/gpio.c
+
+test-arm-audio-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/au_start.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c  -o $(ARM_BUILD_DIR)/au_uart.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/audio_main.c -o $(ARM_BUILD_DIR)/au_main.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S -o $(ARM_BUILD_DIR)/au_vectors.o
+	for s in $(VIRT_AUDIO_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/au_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_AUDIO_ELF) \
+	    $(ARM_BUILD_DIR)/au_start.o $(ARM_BUILD_DIR)/au_main.o \
+	    $(ARM_BUILD_DIR)/au_uart.o $(ARM_BUILD_DIR)/au_vectors.o \
+	    $(ARM_BUILD_DIR)/au_pmm.o $(ARM_BUILD_DIR)/au_mmu.o \
+	    $(ARM_BUILD_DIR)/au_vmem.o $(ARM_BUILD_DIR)/au_exceptions.o \
+	    $(ARM_BUILD_DIR)/au_string.o $(ARM_BUILD_DIR)/au_dma.o \
+	    $(ARM_BUILD_DIR)/au_audio.o $(ARM_BUILD_DIR)/au_i2s.o \
+	    $(ARM_BUILD_DIR)/au_gpio.o
+	rm -f $(ARM_BUILD_DIR)/virt_audio.log
+	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_audio.log -net none \
+	    -kernel $(VIRT_AUDIO_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_audio.log
+	@grep -q "AUDIO-DMA: PASS" $(ARM_BUILD_DIR)/virt_audio.log \
+	  && echo "QEMU virt DMA-audio smoke test PASSED" \
+	  || { echo "QEMU virt DMA-audio smoke test FAILED"; exit 1; }
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
@@ -1097,4 +1141,4 @@ arm-install-cross:
 	sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
 		qemu-system-arm
 
-.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc test-arm-exc-qemu test-arm-user-qemu test-arm-fault-qemu test-arm-sched-qemu test-arm-i2s test-arm-i2s-qemu arm-install-deps arm-install-cross
+.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc test-arm-exc-qemu test-arm-user-qemu test-arm-fault-qemu test-arm-sched-qemu test-arm-i2s test-arm-i2s-qemu test-arm-audio test-arm-audio-qemu arm-install-deps arm-install-cross
