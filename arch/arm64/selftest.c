@@ -14,9 +14,15 @@
 #include "vmem.h"
 #include "kheap.h"
 #include "process.h"
+#include "usermode.h"
 #include "uart_pl011.h"
 #include <stdint.h>
 #include <stddef.h>
+
+/* User-mode demo payloads (arch/arm64/user_demo.S). */
+extern char user_payload[], user_payload_end[];
+extern char user_priv_payload[], user_priv_payload_end[];
+void *memcpy(void *, const void *, size_t);
 
 /* A virtual window well above the identity-mapped RAM/MMIO (4 GiB), so the
  * VMM creates fresh L0-L3 tables rather than touching the 2 MiB identity
@@ -151,4 +157,49 @@ void m2_process_selftest(void)
     uart_printf("proc  : teardown reclaims frames ..... %s\r\n", OKBAD(reclaimed));
 
     uart_puts("=== M2 self-test complete ===\r\n\r\n");
+}
+
+/* Run a payload at EL0 in its own address space and return the exit code. */
+static long run_user_payload(const char *name, char *code, size_t code_len)
+{
+    process_t *p = process_create(name);
+    if (!p)
+        return -2;
+
+    /* Copy the payload into a user code frame (RX) and add a user stack (RW). */
+    uintptr_t code_pa = phys_alloc_page();
+    memcpy((void *)code_pa, code, code_len);
+    process_map(p, code_pa, USER_VA_BASE, PAGE_SIZE, VMM_READ | VMM_EXEC);
+
+    uintptr_t stack_pa = phys_alloc_page();
+    uintptr_t stack_va = USER_VA_BASE + 0x10000;
+    process_map(p, stack_pa, stack_va, PAGE_SIZE, VMM_READ | VMM_WRITE);
+
+    /* Save the kernel TTBR0, run the process, restore it. */
+    uint64_t kttbr;
+    __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(kttbr));
+    long code_ret = run_user(USER_VA_BASE, stack_va + PAGE_SIZE, p->ttbr0);
+    __asm__ volatile("msr ttbr0_el1, %0; isb" :: "r"(kttbr));
+
+    process_destroy(p);
+    return code_ret;
+}
+
+/* M2 (issue #13): EL0 entry + SVC syscall ABI. */
+void m2_user_selftest(void)
+{
+    uart_puts("=== M2 EL0 + SVC self-test (issue #13) ===\r\n");
+
+    uart_puts("user  : running EL0 program (expect a greeting below)\r\n  >> ");
+    long c1 = run_user_payload("user-demo", user_payload,
+                               (size_t)(user_payload_end - user_payload));
+    uart_printf("user  : sys_write/sys_exit ......... %s (code=%d)\r\n",
+                OKBAD(c1 == 0), (int)c1);
+
+    long c2 = run_user_payload("user-priv", user_priv_payload,
+                               (size_t)(user_priv_payload_end - user_priv_payload));
+    uart_printf("user  : privileged insn trapped .... %s (code=%d)\r\n",
+                OKBAD(c2 == -1), (int)c2);
+
+    uart_puts("=== M2 EL0 self-test complete ===\r\n\r\n");
 }
