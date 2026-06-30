@@ -102,6 +102,12 @@ jobs:
       - name: DMA-audio API smoke on QEMU virt (no faults)
         run: make test-arm-audio-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Sine-generator host unit tests (ASan + UBSan)
+        run: make test-arm-sine
+
+      - name: Sine-generator API smoke on QEMU virt (no faults)
+        run: make test-arm-sine-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04

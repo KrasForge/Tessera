@@ -789,6 +789,7 @@ bios-uefi-test:
 
 ARCH_ARM_DIR  = arch/arm64
 DRIVERS_DIR   = drivers
+AUDIO_DIR     = audio
 ARM_BUILD_DIR = $(BUILD_DIR)/arm
 ARM_CPU       = cortex-a72
 
@@ -822,7 +823,8 @@ ARM_LDFLAGS  = -T $(ARM_LDSCRIPT)
 # context_switch.asm, user_mode.asm) which contain x86-specific inline
 # assembly and x86 I/O-port intrinsics.  These files remain untouched for
 # the legacy x86 target (make with no arguments).
-ARM_C_SOURCES   = $(wildcard $(ARCH_ARM_DIR)/*.c) $(wildcard $(DRIVERS_DIR)/*.c)
+ARM_C_SOURCES   = $(wildcard $(ARCH_ARM_DIR)/*.c) $(wildcard $(DRIVERS_DIR)/*.c) \
+                  $(wildcard $(AUDIO_DIR)/*.c)
 ARM_ASM_SOURCES = $(wildcard $(ARCH_ARM_DIR)/*.S) $(BOOT_DIR)/start.S
 ARM_OBJECTS = $(patsubst %.c,$(ARM_BUILD_DIR)/%.o,$(notdir $(ARM_C_SOURCES))) \
               $(patsubst %.S,$(ARM_BUILD_DIR)/%.o,$(notdir $(ARM_ASM_SOURCES)))
@@ -849,6 +851,10 @@ $(ARM_BUILD_DIR)/%.o: $(ARCH_ARM_DIR)/%.S | $(ARM_BUILD_DIR)
 
 # Shared ARM drivers (drivers/*.c)
 $(ARM_BUILD_DIR)/%.o: $(DRIVERS_DIR)/%.c | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_CFLAGS) -c $< -o $@
+
+# Audio subsystem (audio/*.c)
+$(ARM_BUILD_DIR)/%.o: $(AUDIO_DIR)/%.c | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(ARM_CFLAGS) -c $< -o $@
 
 # Boot entry stub (boot/start.S)
@@ -1121,6 +1127,49 @@ test-arm-audio-qemu: | $(ARM_BUILD_DIR)
 	  && echo "QEMU virt DMA-audio smoke test PASSED" \
 	  || { echo "QEMU virt DMA-audio smoke test FAILED"; exit 1; }
 
+# Host unit tests for the sine generator (issue #18).
+ARM_SINE_TEST_SRCS = tests/arm64/sine_test.c $(AUDIO_DIR)/sine_gen.c
+ARM_SINE_TEST_BIN  = $(ARM_BUILD_DIR)/sine_test
+
+test-arm-sine: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -Iinclude \
+	      $(ARM_SINE_TEST_SRCS) -o $(ARM_SINE_TEST_BIN)
+	$(ARM_SINE_TEST_BIN)
+
+# Sine-generator API smoke on QEMU 'virt' (issue #18).
+VIRT_SINE_ELF  = $(ARM_BUILD_DIR)/virt_sine.elf
+VIRT_SINE_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                 $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/exceptions.c \
+                 $(ARCH_ARM_DIR)/string.c drivers/dma.c drivers/audio.c \
+                 drivers/i2s.c drivers/gpio.c $(AUDIO_DIR)/sine_gen.c
+
+test-arm-sine-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/sg_start.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/sg_uart.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/sine_main.c -o $(ARM_BUILD_DIR)/sg_main.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S -o $(ARM_BUILD_DIR)/sg_vectors.o
+	for s in $(VIRT_SINE_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/sg_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_SINE_ELF) \
+	    $(ARM_BUILD_DIR)/sg_start.o $(ARM_BUILD_DIR)/sg_main.o \
+	    $(ARM_BUILD_DIR)/sg_uart.o $(ARM_BUILD_DIR)/sg_vectors.o \
+	    $(ARM_BUILD_DIR)/sg_pmm.o $(ARM_BUILD_DIR)/sg_mmu.o \
+	    $(ARM_BUILD_DIR)/sg_vmem.o $(ARM_BUILD_DIR)/sg_exceptions.o \
+	    $(ARM_BUILD_DIR)/sg_string.o $(ARM_BUILD_DIR)/sg_dma.o \
+	    $(ARM_BUILD_DIR)/sg_audio.o $(ARM_BUILD_DIR)/sg_i2s.o \
+	    $(ARM_BUILD_DIR)/sg_gpio.o $(ARM_BUILD_DIR)/sg_sine_gen.o
+	rm -f $(ARM_BUILD_DIR)/virt_sine.log
+	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_sine.log -net none \
+	    -kernel $(VIRT_SINE_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_sine.log
+	@grep -q "SINE-GEN: PASS" $(ARM_BUILD_DIR)/virt_sine.log \
+	  && echo "QEMU virt sine-generator smoke test PASSED" \
+	  || { echo "QEMU virt sine-generator smoke test FAILED"; exit 1; }
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
@@ -1141,4 +1190,4 @@ arm-install-cross:
 	sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
 		qemu-system-arm
 
-.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc test-arm-exc-qemu test-arm-user-qemu test-arm-fault-qemu test-arm-sched-qemu test-arm-i2s test-arm-i2s-qemu test-arm-audio test-arm-audio-qemu arm-install-deps arm-install-cross
+.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc test-arm-exc-qemu test-arm-user-qemu test-arm-fault-qemu test-arm-sched-qemu test-arm-i2s test-arm-i2s-qemu test-arm-audio test-arm-audio-qemu test-arm-sine test-arm-sine-qemu arm-install-deps arm-install-cross
