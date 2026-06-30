@@ -31,6 +31,12 @@ __attribute__((weak)) void sched_kill(struct trapframe *tf) { (void)tf; }
  * no-op. */
 __attribute__((weak)) void syscall_trace(uint64_t num) { (void)num; }
 
+/* Audio-graph control plane (issue #28).  Weak defaults so harnesses without
+ * the control plane still link; graph_control glue provides the strong ones. */
+__attribute__((weak)) long sys_graph_connect(uint32_t s, uint32_t d)    { (void)s; (void)d; return -1; }
+__attribute__((weak)) long sys_graph_disconnect(uint32_t s, uint32_t d) { (void)s; (void)d; return -1; }
+__attribute__((weak)) long sys_graph_list(void)                         { return -1; }
+
 void arm64_handle_svc(struct trapframe *tf)
 {
     uint64_t num = tf->x[8];
@@ -57,6 +63,16 @@ void arm64_handle_svc(struct trapframe *tf)
 
     case SYS_YIELD:
         sched_yield(tf);   /* swaps in the next task's frame (no-op if alone) */
+        break;
+
+    case SYS_GRAPH_CONNECT:
+        tf->x[0] = (uint64_t)sys_graph_connect((uint32_t)tf->x[0], (uint32_t)tf->x[1]);
+        break;
+    case SYS_GRAPH_DISCONNECT:
+        tf->x[0] = (uint64_t)sys_graph_disconnect((uint32_t)tf->x[0], (uint32_t)tf->x[1]);
+        break;
+    case SYS_GRAPH_LIST:
+        tf->x[0] = (uint64_t)sys_graph_list();
         break;
 
     default:

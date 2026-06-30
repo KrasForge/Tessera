@@ -1277,6 +1277,17 @@ test-arm-graph: | $(ARM_BUILD_DIR)
 	      $(ARM_GRAPH_TEST_SRCS) -o $(ARM_GRAPH_TEST_BIN)
 	$(ARM_GRAPH_TEST_BIN)
 
+# Host unit tests for the graph control plane (issue #28).
+ARM_GCTL_TEST_SRCS = tests/arm64/graph_control_test.c $(ARCH_ARM_DIR)/graph_control.c \
+                     $(ARCH_ARM_DIR)/audio_graph.c
+ARM_GCTL_TEST_BIN  = $(ARM_BUILD_DIR)/graph_control_test
+
+test-arm-graph-control: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) \
+	      $(ARM_GCTL_TEST_SRCS) -o $(ARM_GCTL_TEST_BIN)
+	$(ARM_GCTL_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -1537,6 +1548,54 @@ test-arm-graph-qemu: $(ARM_BUILD_DIR)/plugin_sine.elf $(ARM_BUILD_DIR)/plugin_ef
 	@grep -q "AUDIO-GRAPH: PASS" $(ARM_BUILD_DIR)/virt_graph.log \
 	  && echo "QEMU virt audio-graph test PASSED" \
 	  || { echo "QEMU virt audio-graph test FAILED"; exit 1; }
+
+# ---- M6: graph control syscalls (issue #28) -------------------------------
+$(ARM_BUILD_DIR)/plugin_controller.elf: plugins/example_controller/controller.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/controller.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/controller.o
+
+# Control-syscall test on QEMU 'virt' (MMU on): an EL0 client wires/unwires the
+# graph at runtime via syscalls; the kernel services them through the control
+# plane and verifies connect/duplicate/list/disconnect.
+VIRT_GCTL_ELF  = $(ARM_BUILD_DIR)/virt_gctl.elf
+VIRT_GCTL_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                 $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                 $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                 $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                 $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+                 $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/string.c
+
+test-arm-graph-ctl-qemu: $(ARM_BUILD_DIR)/plugin_controller.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/gc_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/gc_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/gc_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/gc_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/ctl_blob.S            -o $(ARM_BUILD_DIR)/gc_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/gc_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/graph_ctl_main.c -o $(ARM_BUILD_DIR)/gc_main.o
+	for s in $(VIRT_GCTL_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/gc_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_GCTL_ELF) \
+	    $(ARM_BUILD_DIR)/gc_start.o $(ARM_BUILD_DIR)/gc_main.o \
+	    $(ARM_BUILD_DIR)/gc_uart.o $(ARM_BUILD_DIR)/gc_vectors.o \
+	    $(ARM_BUILD_DIR)/gc_entry.o $(ARM_BUILD_DIR)/gc_tramp.o \
+	    $(ARM_BUILD_DIR)/gc_blob.o \
+	    $(ARM_BUILD_DIR)/gc_pmm.o $(ARM_BUILD_DIR)/gc_mmu.o \
+	    $(ARM_BUILD_DIR)/gc_vmem.o $(ARM_BUILD_DIR)/gc_process.o \
+	    $(ARM_BUILD_DIR)/gc_exceptions.o $(ARM_BUILD_DIR)/gc_syscalls.o \
+	    $(ARM_BUILD_DIR)/gc_elf64.o $(ARM_BUILD_DIR)/gc_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/gc_audio_ringbuf.o $(ARM_BUILD_DIR)/gc_audio_graph.o \
+	    $(ARM_BUILD_DIR)/gc_graph_control.o $(ARM_BUILD_DIR)/gc_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_gctl.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_gctl.log -net none \
+	    -kernel $(VIRT_GCTL_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_gctl.log
+	@grep -q "GRAPH-CTL: PASS" $(ARM_BUILD_DIR)/virt_gctl.log \
+	  && echo "QEMU virt graph-control test PASSED" \
+	  || { echo "QEMU virt graph-control test FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
