@@ -181,6 +181,25 @@ jobs:
       - name: Audio latency/jitter reporting on QEMU virt (cross-core reporter)
         run: make test-arm-latency-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  plugin-abi-tests:
+    name: M5 plugin ABI - semantics host test + AArch64 ELF build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Plugin ABI semantic host tests (ASan + UBSan)
+        run: make test-arm-plugin-abi
+
+      - name: Reference plugin builds as a valid AArch64 ELF with all ABI symbols
+        run: make test-arm-plugin-elf CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
