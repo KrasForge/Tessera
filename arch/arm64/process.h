@@ -45,7 +45,16 @@ typedef struct process {
     uint64_t     ttbr0;    /* TTBR0_EL1 value: pgd_pa | (asid << 48)         */
     long         exit_code; /* sys_exit value, or -1 if killed by a fault   */
     char         name[16];
+    volatile uint32_t *liveness; /* shared-ring status word, or NULL (#26)   */
 } process_t;
+
+/* Value the kernel writes to *liveness when the process is killed; matches
+ * ARB_PRODUCER_DEAD in audio_ringbuf.h so the host detects plugin death. */
+#define PROC_LIVENESS_DEAD 2u
+
+/* Register a kernel-writable status word (e.g. a shared audio-ring header
+ * field) that the kernel sets to PROC_LIVENESS_DEAD when p is killed. */
+void process_set_liveness(process_t *p, volatile uint32_t *status);
 
 /* Allocate a process and its empty user address space.  Returns NULL if the
  * process table, ASID space, or physical memory is exhausted. */

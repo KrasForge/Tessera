@@ -32,6 +32,12 @@
 
 #define ARB_MAGIC 0x52427541u    /* 'AuBR' - marks a valid, initialised ring */
 
+/* Producer liveness, written by the kernel into the shared header.  The host
+ * watches this to learn that the plugin producing into the ring has died, so
+ * it can substitute silence instead of stalling (issue #26). */
+#define ARB_PRODUCER_ALIVE 1u
+#define ARB_PRODUCER_DEAD  2u
+
 typedef struct {
     uint32_t magic;       /* ARB_MAGIC once initialised                    */
     uint32_t capacity;    /* frames the ring holds (power of two)          */
@@ -41,6 +47,8 @@ typedef struct {
     uint32_t read_idx;    /* consumer index, free-running (release store)  */
     uint32_t overflow;    /* frames dropped because the ring was full      */
     uint32_t underflow;   /* frames the consumer had to fill with silence  */
+    uint32_t producer_state; /* ARB_PRODUCER_ALIVE / _DEAD (kernel-written) */
+    uint32_t _reserved;
 } audio_ring_hdr_t;
 
 /* Total bytes a ring of `capacity` stereo frames needs (header + samples). */

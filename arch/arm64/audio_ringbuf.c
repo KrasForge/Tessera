@@ -11,6 +11,8 @@ void arb_init(audio_ring_hdr_t *h, uint32_t capacity)
     h->read_idx    = 0;
     h->overflow    = 0;
     h->underflow   = 0;
+    h->producer_state = ARB_PRODUCER_ALIVE;
+    h->_reserved   = 0;
     /* Publish the magic last, with a release, so a consumer that sees a valid
      * magic also sees the initialised fields. */
     __atomic_store_n(&h->magic, ARB_MAGIC, __ATOMIC_RELEASE);

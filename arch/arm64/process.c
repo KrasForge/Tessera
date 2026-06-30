@@ -64,8 +64,15 @@ process_t *process_create(const char *name)
     p->pgd    = pgd;
     p->ttbr0  = vmm_make_ttbr(pgd_pa, asid);
     p->state  = PROC_READY;
+    p->liveness = (volatile uint32_t *)0;
     copy_name(p->name, name);
     return p;
+}
+
+void process_set_liveness(process_t *p, volatile uint32_t *status)
+{
+    if (p)
+        p->liveness = status;
 }
 
 int process_map(process_t *p, uintptr_t pa, uintptr_t va, size_t size,
@@ -167,6 +174,13 @@ long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
 
     p->exit_code = code;
     p->state = (code < 0) ? PROC_KILLED : PROC_ZOMBIE;
+
+    /* On a fault kill, publish the death into the shared status word so a host
+     * reading this process's ring buffer learns the producer is gone and can
+     * substitute silence (issue #26). */
+    if (code < 0 && p->liveness)
+        __atomic_store_n(p->liveness, PROC_LIVENESS_DEAD, __ATOMIC_RELEASE);
+
     return code;
 }
 #endif /* !HOSTTEST */
