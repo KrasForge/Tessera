@@ -10,6 +10,9 @@
  * Build/run via:  make test-arm-m1
  */
 
+/* _GNU_SOURCE exposes MAP_ANONYMOUS / MAP_NORESERVE under strict -std=c11. */
+#define _GNU_SOURCE
+
 #include "pmm.h"
 #include "mmu.h"
 #include "vmem.h"
