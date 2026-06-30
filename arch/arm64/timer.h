@@ -26,6 +26,14 @@ void timer_tick(void);
 /* Total ticks since timer_init(). */
 uint64_t timer_ticks(void);
 
+/* Absolute CNTPCT value of the next scheduled tick (CNTP_CVAL).  After a tick
+ * has fired and been serviced, (timer_deadline() - timer_interval()) is the
+ * deadline that just elapsed - used to measure IRQ-to-thread wakeup latency. */
+uint64_t timer_deadline(void);
+
+/* Counter ticks per timer interval (CNTFRQ / hz). */
+uint64_t timer_interval(void);
+
 /* Disable the timer and mask its interrupt. */
 void timer_stop(void);
 

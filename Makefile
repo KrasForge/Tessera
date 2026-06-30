@@ -1225,6 +1225,17 @@ test-arm-smp: | $(ARM_BUILD_DIR)
 	      $(ARM_SMP_TEST_SRCS) -o $(ARM_SMP_TEST_BIN) -lpthread
 	$(ARM_SMP_TEST_BIN)
 
+# Host unit tests for the audio-latency statistics (issue #22): min/max/mean/
+# stddev over the callback window, integer sqrt, and the cycles->us conversion.
+ARM_LAT_TEST_SRCS = tests/arm64/latency_test.c $(ARCH_ARM_DIR)/latency.c
+ARM_LAT_TEST_BIN  = $(ARM_BUILD_DIR)/latency_test
+
+test-arm-latency: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_LAT_TEST_SRCS) -o $(ARM_LAT_TEST_BIN)
+	$(ARM_LAT_TEST_BIN)
+
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
 # only leave the CPU by being preempted.  Verifies priority preemption,
@@ -1307,6 +1318,44 @@ test-arm-smp-qemu: | $(ARM_BUILD_DIR)
 	@grep -q "AUDIO-CORE: PASS" $(ARM_BUILD_DIR)/virt_smp.log \
 	  && echo "QEMU virt audio-core SMP test PASSED" \
 	  || { echo "QEMU virt audio-core SMP test FAILED"; exit 1; }
+
+# Audio latency/jitter reporting test on QEMU 'virt' (issue #22): CPU0 measures
+# every callback (CNTPCT period + IRQ-to-thread wakeup) and publishes stats;
+# CPU1 renders the `audio_latency:` line over UART; CPU2 produces samples.
+# Proves the reporting does not corrupt the audio cadence (overruns stay zero).
+VIRT_LAT_ELF  = $(ARM_BUILD_DIR)/virt_latency.elf
+VIRT_LAT_SRCS = $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
+                $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/latency.c \
+                $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/irq.c \
+                $(ARCH_ARM_DIR)/timer.c drivers/gic.c
+
+test-arm-latency-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/lt_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S -o $(ARM_BUILD_DIR)/lt_smpentry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S   -o $(ARM_BUILD_DIR)/lt_vectors.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/lt_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/latency_main.c -o $(ARM_BUILD_DIR)/lt_main.o
+	for s in $(VIRT_LAT_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/lt_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_LAT_ELF) \
+	    $(ARM_BUILD_DIR)/lt_start.o $(ARM_BUILD_DIR)/lt_smpentry.o \
+	    $(ARM_BUILD_DIR)/lt_main.o $(ARM_BUILD_DIR)/lt_uart.o \
+	    $(ARM_BUILD_DIR)/lt_vectors.o \
+	    $(ARM_BUILD_DIR)/lt_smp.o $(ARM_BUILD_DIR)/lt_spsc_ring.o \
+	    $(ARM_BUILD_DIR)/lt_audio_core.o $(ARM_BUILD_DIR)/lt_latency.o \
+	    $(ARM_BUILD_DIR)/lt_exceptions.o $(ARM_BUILD_DIR)/lt_irq.o \
+	    $(ARM_BUILD_DIR)/lt_timer.o $(ARM_BUILD_DIR)/lt_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_latency.log
+	-timeout 60 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_latency.log -net none \
+	    -kernel $(VIRT_LAT_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_latency.log
+	@grep -q "AUDIO-LAT: PASS" $(ARM_BUILD_DIR)/virt_latency.log \
+	  && grep -q "audio_latency:" $(ARM_BUILD_DIR)/virt_latency.log \
+	  && echo "QEMU virt audio-latency test PASSED" \
+	  || { echo "QEMU virt audio-latency test FAILED"; exit 1; }
 
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
