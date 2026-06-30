@@ -788,6 +788,7 @@ bios-uefi-test:
 # =============================================================================
 
 ARCH_ARM_DIR  = arch/arm64
+DRIVERS_DIR   = drivers
 ARM_BUILD_DIR = $(BUILD_DIR)/arm
 ARM_CPU       = cortex-a72
 
@@ -813,8 +814,14 @@ ARM_ASFLAGS = $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding -g -Iinclude/
 ARM_LDSCRIPT = $(ARCH_ARM_DIR)/kernel.ld
 ARM_LDFLAGS  = -T $(ARM_LDSCRIPT)
 
-# Sources: C + asm under arch/arm64, plus the boot entry stub in boot/.
-ARM_C_SOURCES   = $(wildcard $(ARCH_ARM_DIR)/*.c)
+# Sources: C + asm under arch/arm64 and drivers/, plus boot/start.S.
+#
+# Issue #6 — x86 pruning: the ARM build deliberately excludes all files
+# under kernel/ (IDT, GDT, PCI, AC97, VMM asm stubs, interrupt_stubs.asm,
+# context_switch.asm, user_mode.asm) which contain x86-specific inline
+# assembly and x86 I/O-port intrinsics.  These files remain untouched for
+# the legacy x86 target (make with no arguments).
+ARM_C_SOURCES   = $(wildcard $(ARCH_ARM_DIR)/*.c) $(wildcard $(DRIVERS_DIR)/*.c)
 ARM_ASM_SOURCES = $(wildcard $(ARCH_ARM_DIR)/*.S) $(BOOT_DIR)/start.S
 ARM_OBJECTS = $(patsubst %.c,$(ARM_BUILD_DIR)/%.o,$(notdir $(ARM_C_SOURCES))) \
               $(patsubst %.S,$(ARM_BUILD_DIR)/%.o,$(notdir $(ARM_ASM_SOURCES)))
@@ -839,6 +846,10 @@ $(ARM_BUILD_DIR)/%.o: $(ARCH_ARM_DIR)/%.c | $(ARM_BUILD_DIR)
 $(ARM_BUILD_DIR)/%.o: $(ARCH_ARM_DIR)/%.S | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(ARM_ASFLAGS) -c $< -o $@
 
+# Shared ARM drivers (drivers/*.c)
+$(ARM_BUILD_DIR)/%.o: $(DRIVERS_DIR)/%.c | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_CFLAGS) -c $< -o $@
+
 # Boot entry stub (boot/start.S)
 $(ARM_BUILD_DIR)/start.o: $(BOOT_DIR)/start.S | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(ARM_ASFLAGS) -c $< -o $@
@@ -854,9 +865,21 @@ $(ARM_KERNEL_IMG): $(ARM_KERNEL_ELF)
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
+# Boot the ARM kernel image in QEMU (raspi4b) with serial output on stdio.
+# For the CI smoke test, use: make qemu-arm | grep -m1 "Tessera ARM boot OK"
+qemu-arm: $(ARM_KERNEL_IMG)
+	qemu-system-aarch64 -machine raspi4b -nographic -serial stdio \
+		-no-reboot -kernel $(ARM_KERNEL_IMG)
+
 # Install the default (LLVM) ARM toolchain on Ubuntu/Debian.
 arm-install-deps:
 	sudo apt-get update
 	sudo apt-get install -y clang lld llvm binutils
 
-.PHONY: arm arm-clean arm-install-deps
+# Install the GCC cross-toolchain + QEMU (used in CI and by make qemu-arm).
+arm-install-cross:
+	sudo apt-get update
+	sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+		qemu-system-arm
+
+.PHONY: arm arm-clean qemu-arm arm-install-deps arm-install-cross

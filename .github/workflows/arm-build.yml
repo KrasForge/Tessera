@@ -1,0 +1,49 @@
+name: AArch64 ARM build and boot-smoke test
+
+# Issue #5: CI workflow that builds the AArch64 kernel image and boots it
+# under QEMU raspi4b, verifying that "Tessera ARM boot OK" appears on the
+# virtual serial port within 60 seconds.
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  arm-build-and-boot:
+    name: Build and smoke-test ARM kernel (QEMU raspi4b)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install AArch64 cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            qemu-system-arm
+
+      - name: Build AArch64 kernel image
+        run: make arm CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: Verify kernel image exists
+        run: |
+          test -f build/arm/kernel8.img
+          ls -lh build/arm/kernel8.img
+
+      - name: Boot smoke test (QEMU raspi4b, serial stdio)
+        run: |
+          timeout 60 qemu-system-aarch64 \
+            -machine raspi4b \
+            -nographic \
+            -serial stdio \
+            -no-reboot \
+            -kernel build/arm/kernel8.img \
+            2>/dev/null \
+          | grep -m1 "Tessera ARM boot OK" \
+          && echo "Boot smoke test PASSED" \
+          || { echo "Boot smoke test FAILED — boot message not seen within 60 s"; exit 1; }
