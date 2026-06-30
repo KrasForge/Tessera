@@ -27,4 +27,11 @@
 #define GRAPH_SYNTH_PID  7u
 #define GRAPH_DAC_PID    0u     /* the DAC sink is node pid 0 */
 
+/* Per-plugin parameter queue VA (issue #30): where the plugin manager maps a
+ * plugin's lock-free parameter queue; must match plugin_mgr.h (guarded so the
+ * two headers can be included together without a redefinition warning). */
+#ifndef PARAM_Q_VA
+#define PARAM_Q_VA       (0x8000000000ull + 0x0E000000ull)
+#endif
+
 #endif /* TESSERA_RING_CONTRACT_H */

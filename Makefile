@@ -1632,6 +1632,71 @@ test-arm-graph-ctl-qemu: $(ARM_BUILD_DIR)/plugin_controller.elf
 	  && echo "QEMU virt graph-control test PASSED" \
 	  || { echo "QEMU virt graph-control test FAILED"; exit 1; }
 
+# ---- M7: control syscalls (issue #30) -------------------------------------
+# Host unit test for the lock-free parameter queue.
+ARM_PQ_TEST_SRCS = tests/arm64/param_queue_test.c $(ARCH_ARM_DIR)/param_queue.c
+test-arm-param-queue: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_PQ_TEST_SRCS) -o $(ARM_BUILD_DIR)/param_queue_test -lpthread
+	$(ARM_BUILD_DIR)/param_queue_test
+
+# Control test plugins.
+$(ARM_BUILD_DIR)/pq_plugin.o: $(ARCH_ARM_DIR)/param_queue.c | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $@
+
+$(ARM_BUILD_DIR)/plugin_echo.elf: plugins/example_echo/echo.c $(ARM_BUILD_DIR)/pq_plugin.o $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/echo.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/echo.o $(ARM_BUILD_DIR)/pq_plugin.o
+
+$(ARM_BUILD_DIR)/plugin_ctl2.elf: plugins/example_ctl2/ctl2.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/ctl2.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/ctl2.o
+
+# Full control-syscall test on QEMU 'virt' (MMU on): leak-free load/unload,
+# parameter delivery, and all five syscalls callable from EL0.
+VIRT_CTL_ELF  = $(ARM_BUILD_DIR)/virt_control.elf
+VIRT_CTL_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+                $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/string.c
+
+test-arm-control-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plugin_echo.elf \
+                       $(ARM_BUILD_DIR)/plugin_ctl2.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/ct_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/ct_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/ct_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/ct_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/control_blob.S        -o $(ARM_BUILD_DIR)/ct_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/ct_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/control_main.c -o $(ARM_BUILD_DIR)/ct_main.o
+	for s in $(VIRT_CTL_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/ct_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_CTL_ELF) \
+	    $(ARM_BUILD_DIR)/ct_start.o $(ARM_BUILD_DIR)/ct_main.o \
+	    $(ARM_BUILD_DIR)/ct_uart.o $(ARM_BUILD_DIR)/ct_vectors.o \
+	    $(ARM_BUILD_DIR)/ct_entry.o $(ARM_BUILD_DIR)/ct_tramp.o \
+	    $(ARM_BUILD_DIR)/ct_blob.o \
+	    $(ARM_BUILD_DIR)/ct_pmm.o $(ARM_BUILD_DIR)/ct_mmu.o \
+	    $(ARM_BUILD_DIR)/ct_vmem.o $(ARM_BUILD_DIR)/ct_process.o \
+	    $(ARM_BUILD_DIR)/ct_exceptions.o $(ARM_BUILD_DIR)/ct_syscalls.o \
+	    $(ARM_BUILD_DIR)/ct_elf64.o $(ARM_BUILD_DIR)/ct_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/ct_audio_ringbuf.o $(ARM_BUILD_DIR)/ct_audio_graph.o \
+	    $(ARM_BUILD_DIR)/ct_graph_control.o $(ARM_BUILD_DIR)/ct_param_queue.o \
+	    $(ARM_BUILD_DIR)/ct_plugin_mgr.o $(ARM_BUILD_DIR)/ct_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_control.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_control.log -net none \
+	    -kernel $(VIRT_CTL_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_control.log
+	@grep -q "CONTROL: PASS" $(ARM_BUILD_DIR)/virt_control.log \
+	  && echo "QEMU virt control-syscall test PASSED" \
+	  || { echo "QEMU virt control-syscall test FAILED"; exit 1; }
+
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
 # only leave the CPU by being preempted.  Verifies priority preemption,

@@ -24,11 +24,19 @@ struct trapframe;
 #define SYS_GRAPH_DISCONNECT 5  /* (src_pid, dst_pid) -> 0 or negative error */
 #define SYS_GRAPH_LIST       6  /* () -> current edge count                  */
 
+/* Plugin lifecycle control plane (issue #30, M7). */
+#define SYS_PLUGIN_LOAD      7  /* (path) -> new pid (> 0) or negative error    */
+#define SYS_PLUGIN_UNLOAD    8  /* (pid)  -> 0 or negative error                */
+#define SYS_PLUGIN_SET_PARAM 9  /* (pid, param_id, value_bits) -> 0 or negative */
+
 /* Control-plane handlers; weak defaults in syscalls.c return -1, the graph
- * control plane provides the strong versions. */
+ * control plane / plugin manager provide the strong versions. */
 long sys_graph_connect(uint32_t src_pid, uint32_t dst_pid);
 long sys_graph_disconnect(uint32_t src_pid, uint32_t dst_pid);
 long sys_graph_list(void);
+long sys_plugin_load(const char *path);
+long sys_plugin_unload(uint32_t pid);
+long sys_plugin_set_param(uint32_t pid, uint32_t param_id, uint32_t value_bits);
 
 /* Drop to EL0 and run a process until it exits (or faults).
  *

@@ -79,6 +79,10 @@ int audio_graph_find_edge(const audio_graph_t *g, int src, int dst);
  * caller can release it, or NULL if there was no such edge. */
 void *audio_graph_disconnect(audio_graph_t *g, int src, int dst);
 
+/* Remove node `n` and every edge touching it (used when a plugin is unloaded).
+ * Keeps the node table reusable across repeated load/unload. */
+void audio_graph_remove_node(audio_graph_t *g, int n);
+
 /* Topologically sort the nodes into `order` (capacity `max`), producers before
  * consumers and the DAC last.  Returns the number of nodes written, or -1 if
  * the graph has a cycle or `max` is too small. */
