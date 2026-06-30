@@ -200,6 +200,25 @@ jobs:
       - name: Reference plugin builds as a valid AArch64 ELF with all ABI symbols
         run: make test-arm-plugin-elf CROSS_COMPILE=aarch64-linux-gnu-
 
+  plugin-loader-tests:
+    name: M5 plugin loader - ELF reader host test + QEMU virt isolated load
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: ELF64 reader host unit tests (ASan + UBSan)
+        run: make test-arm-elf
+
+      - name: Load plugin into isolated address space on QEMU virt (+ MMU kill)
+        run: make test-arm-plugin-load-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04

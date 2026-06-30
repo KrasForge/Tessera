@@ -1236,6 +1236,16 @@ test-arm-latency: | $(ARM_BUILD_DIR)
 	      $(ARM_LAT_TEST_SRCS) -o $(ARM_LAT_TEST_BIN)
 	$(ARM_LAT_TEST_BIN)
 
+# Host unit tests for the ELF64 reader (issue #24).
+ARM_ELF_TEST_SRCS = tests/arm64/elf_test.c $(ARCH_ARM_DIR)/elf64.c
+ARM_ELF_TEST_BIN  = $(ARM_BUILD_DIR)/elf_test
+
+test-arm-elf: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) \
+	      $(ARM_ELF_TEST_SRCS) -o $(ARM_ELF_TEST_BIN)
+	$(ARM_ELF_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -1271,6 +1281,65 @@ test-arm-plugin-elf: | $(ARM_BUILD_DIR)
 	    || { echo "FAILED: missing ABI symbol $$s"; exit 1; }; \
 	done
 	@echo "plugin ABI ELF test PASSED"
+
+# ---- M5: plugin loader (issue #24) ----------------------------------------
+# Build the example plugins as isolated AArch64 executables (PT_LOAD segments,
+# linked at USER_VA_BASE) for the loader to map into a fresh address space.
+PLUGIN_LD = plugins/plugin.ld
+
+$(ARM_BUILD_DIR)/plugin_pass.elf: plugins/example_pass/pass.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/pass.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/pass.o
+
+$(ARM_BUILD_DIR)/plugin_evil.elf: plugins/example_evil/evil.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/evil.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/evil.o
+
+# Full-stack loader test on QEMU 'virt' (MMU on): load a passthrough plugin into
+# its own address space and run plugin_init at EL0; load a misbehaving plugin
+# and confirm the MMU kills it when it touches kernel memory.
+VIRT_PLUGIN_ELF  = $(ARM_BUILD_DIR)/virt_plugin.elf
+VIRT_PLUGIN_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                   $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                   $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                   $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                   $(ARCH_ARM_DIR)/string.c
+
+test-arm-plugin-load-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plugin_evil.elf
+	@echo "--- plugin ELF self-containment (no undefined imports) ---"
+	@for e in plugin_pass plugin_evil; do \
+	  u=$$($(CROSS_COMPILE)readelf -sW $(ARM_BUILD_DIR)/$$e.elf | grep -c ' UND ') ; \
+	  echo "$$e.elf UND symbols: $$u"; \
+	done
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/pg_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/pg_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/pg_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/pg_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/plugin_blob.S          -o $(ARM_BUILD_DIR)/pg_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c   -o $(ARM_BUILD_DIR)/pg_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/plugin_main.c -o $(ARM_BUILD_DIR)/pg_main.o
+	for s in $(VIRT_PLUGIN_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/pg_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_PLUGIN_ELF) \
+	    $(ARM_BUILD_DIR)/pg_start.o $(ARM_BUILD_DIR)/pg_main.o \
+	    $(ARM_BUILD_DIR)/pg_uart.o $(ARM_BUILD_DIR)/pg_vectors.o \
+	    $(ARM_BUILD_DIR)/pg_entry.o $(ARM_BUILD_DIR)/pg_tramp.o \
+	    $(ARM_BUILD_DIR)/pg_blob.o \
+	    $(ARM_BUILD_DIR)/pg_pmm.o $(ARM_BUILD_DIR)/pg_mmu.o \
+	    $(ARM_BUILD_DIR)/pg_vmem.o $(ARM_BUILD_DIR)/pg_process.o \
+	    $(ARM_BUILD_DIR)/pg_exceptions.o $(ARM_BUILD_DIR)/pg_syscalls.o \
+	    $(ARM_BUILD_DIR)/pg_elf64.o $(ARM_BUILD_DIR)/pg_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/pg_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_plugin.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_plugin.log -net none \
+	    -kernel $(VIRT_PLUGIN_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_plugin.log
+	@grep -q "PLUGIN-LOAD: PASS" $(ARM_BUILD_DIR)/virt_plugin.log \
+	  && echo "QEMU virt plugin-loader test PASSED" \
+	  || { echo "QEMU virt plugin-loader test FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
