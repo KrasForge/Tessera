@@ -77,6 +77,25 @@ jobs:
       - name: Run M2 host unit tests (ASan + UBSan)
         run: make test-arm-m2
 
+  audio-tests:
+    name: M3 audio - I2S host math + QEMU virt API smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: I2S clock + waveform host unit tests (ASan + UBSan)
+        run: make test-arm-i2s
+
+      - name: I2S API smoke on QEMU virt (no faults)
+        run: make test-arm-i2s-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
