@@ -30,6 +30,16 @@ int vmm_unmap(uintptr_t va, size_t size);
  * backing.  Returns 0 on success, -1 if any page is not mapped. */
 int vmm_protect(uintptr_t va, size_t size, unsigned flags);
 
+/* Map / unmap into a caller-supplied L0 root (e.g. a process address space
+ * that is not the active table).  No TLB maintenance is performed — the
+ * caller invalidates if/when the table becomes active. */
+int vmm_map_into(uint64_t *pgd, uintptr_t pa, uintptr_t va, size_t size,
+                 unsigned flags);
+int vmm_unmap_from(uint64_t *pgd, uintptr_t va, size_t size);
+
+/* Translate VMM_* permission flags to an ARMv8 descriptor attribute mask. */
+uint64_t vmm_flags_to_attr(unsigned flags);
+
 /* Flush the entire EL1 TLB (inner-shareable). */
 void tlb_flush_all(void);
 

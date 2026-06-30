@@ -53,4 +53,10 @@ uint64_t *mmu_walk_l3(uint64_t *pgd, uintptr_t va, int create);
 int mmu_map_page(uint64_t *pgd, uintptr_t va, uintptr_t pa, uint64_t attr);
 int mmu_unmap_page(uint64_t *pgd, uintptr_t va);
 
+/* Resolve va to its physical address in the table rooted at pgd, walking
+ * through 1 GiB / 2 MiB block descriptors and 4 KiB page descriptors alike.
+ * Returns the physical address (including the in-page offset), or 0 if va is
+ * not mapped. */
+uintptr_t mmu_translate(uint64_t *pgd, uintptr_t va);
+
 #endif /* ARM64_MMU_H */

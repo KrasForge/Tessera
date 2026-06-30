@@ -39,7 +39,7 @@ void tlb_flush_all(void)
 
 /* --- flag translation --------------------------------------------------- */
 
-static uint64_t flags_to_attr(unsigned flags)
+uint64_t vmm_flags_to_attr(unsigned flags)
 {
     uint64_t a = PTE_VALID | PTE_AF;
 
@@ -67,42 +67,62 @@ static uint64_t flags_to_attr(unsigned flags)
     return a;
 }
 
-/* --- map / unmap / protect ---------------------------------------------- */
-
-int vmm_map(uintptr_t pa, uintptr_t va, size_t size, unsigned flags)
+/* --- map / unmap into an arbitrary table -------------------------------- */
+/*
+ * The *_into / *_from variants operate on a caller-supplied L0 root and do
+ * NOT perform TLB maintenance — they are used to populate a process address
+ * space that is not currently installed in TTBR0_EL1 (see arch/arm64/
+ * process.c).  The kernel-facing vmm_map / vmm_unmap wrappers below target
+ * the active kernel table and invalidate the TLB per page.
+ */
+int vmm_map_into(uint64_t *pgd, uintptr_t pa, uintptr_t va, size_t size,
+                 unsigned flags)
 {
     if ((pa | va | size) & (PAGE_SIZE - 1))
         return -1;
 
-    uint64_t *pgd = mmu_kernel_pgd();
-    uint64_t attr = flags_to_attr(flags);
+    uint64_t attr = vmm_flags_to_attr(flags);
 
     for (size_t off = 0; off < size; off += PAGE_SIZE) {
         if (mmu_map_page(pgd, va + off, pa + off, attr) != 0) {
-            /* Roll back the pages mapped so far. */
-            for (size_t done = 0; done < off; done += PAGE_SIZE) {
+            for (size_t done = 0; done < off; done += PAGE_SIZE)
                 mmu_unmap_page(pgd, va + done);
-                tlb_inval_va(va + done);
-            }
             return -1;
         }
-        tlb_inval_va(va + off);
     }
+    return 0;
+}
+
+int vmm_unmap_from(uint64_t *pgd, uintptr_t va, size_t size)
+{
+    if ((va | size) & (PAGE_SIZE - 1))
+        return -1;
+
+    int rc = 0;
+    for (size_t off = 0; off < size; off += PAGE_SIZE)
+        if (mmu_unmap_page(pgd, va + off) != 0)
+            rc = -1;
+    return rc;
+}
+
+/* --- map / unmap / protect (active kernel table) ------------------------ */
+
+int vmm_map(uintptr_t pa, uintptr_t va, size_t size, unsigned flags)
+{
+    uint64_t *pgd = mmu_kernel_pgd();
+    if (vmm_map_into(pgd, pa, va, size, flags) != 0)
+        return -1;
+    for (size_t off = 0; off < size; off += PAGE_SIZE)
+        tlb_inval_va(va + off);
     return 0;
 }
 
 int vmm_unmap(uintptr_t va, size_t size)
 {
-    if ((va | size) & (PAGE_SIZE - 1))
-        return -1;
-
     uint64_t *pgd = mmu_kernel_pgd();
-    int rc = 0;
-    for (size_t off = 0; off < size; off += PAGE_SIZE) {
-        if (mmu_unmap_page(pgd, va + off) != 0)
-            rc = -1;
+    int rc = vmm_unmap_from(pgd, va, size);
+    for (size_t off = 0; off < size; off += PAGE_SIZE)
         tlb_inval_va(va + off);
-    }
     return rc;
 }
 
@@ -112,7 +132,7 @@ int vmm_protect(uintptr_t va, size_t size, unsigned flags)
         return -1;
 
     uint64_t *pgd = mmu_kernel_pgd();
-    uint64_t attr = flags_to_attr(flags);
+    uint64_t attr = vmm_flags_to_attr(flags);
 
     for (size_t off = 0; off < size; off += PAGE_SIZE) {
         uint64_t *e = mmu_walk_l3(pgd, va + off, 0);
