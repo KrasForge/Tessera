@@ -26,9 +26,15 @@ __attribute__((weak)) void sched_yield(struct trapframe *tf) { (void)tf; }
 __attribute__((weak)) void sched_exit(struct trapframe *tf, long code) { (void)tf; (void)code; }
 __attribute__((weak)) void sched_kill(struct trapframe *tf) { (void)tf; }
 
+/* Weak syscall trace hook.  Tests override it (e.g. issue #25 counts SVCs to
+ * prove the audio data path makes none per block); the kernel default is a
+ * no-op. */
+__attribute__((weak)) void syscall_trace(uint64_t num) { (void)num; }
+
 void arm64_handle_svc(struct trapframe *tf)
 {
     uint64_t num = tf->x[8];
+    syscall_trace(num);
 
     switch (num) {
     case SYS_WRITE: {

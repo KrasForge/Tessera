@@ -53,4 +53,11 @@ int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name);
  * killed by the MMU. */
 long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size);
 
+/* Map an existing physical region [pa, pa+bytes) into the plugin's address
+ * space at `va` with `flags` (VMM_*).  Used to share the audio ring buffer
+ * (issue #25) into the plugin at a fixed VA without copying.  Returns 0 on
+ * success. */
+int plugin_map_region(plugin_t *pl, uint64_t va, uintptr_t pa, size_t bytes,
+                      unsigned flags);
+
 #endif /* ARM64_PLUGIN_LOADER_H */

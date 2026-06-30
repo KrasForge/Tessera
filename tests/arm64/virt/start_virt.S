@@ -23,6 +23,14 @@ at_el1:
     ldr     x0, =__stack_top
     mov     sp, x0
 
+    /* Allow FP/SIMD at EL1/EL0 (CPACR_EL1.FPEN = 0b11).  Harnesses whose C is
+     * built -mgeneral-regs-only simply never use it; the plugin/audio harnesses
+     * (and any FP-compiled test_main) need it before the first FP instruction. */
+    mrs     x0, cpacr_el1
+    orr     x0, x0, #(3 << 20)
+    msr     cpacr_el1, x0
+    isb
+
     ldr     x0, =__bss_start
     ldr     x1, =__bss_end
 clear_bss:
