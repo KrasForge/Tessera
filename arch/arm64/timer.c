@@ -44,6 +44,16 @@ uint64_t timer_ticks(void)
     return g_ticks;
 }
 
+uint64_t timer_deadline(void)
+{
+    return g_deadline;
+}
+
+uint64_t timer_interval(void)
+{
+    return g_interval;
+}
+
 void timer_stop(void)
 {
     __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)CNTP_CTL_IMASK));

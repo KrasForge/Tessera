@@ -162,6 +162,25 @@ jobs:
       - name: Dedicated audio-core SMP test on QEMU virt (4 cores via PSCI)
         run: make test-arm-smp-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  latency-tests:
+    name: M4 latency - audio jitter stats host tests + QEMU virt reporting
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Latency-stats host unit tests (min/max/mean/stddev, ASan + UBSan)
+        run: make test-arm-latency
+
+      - name: Audio latency/jitter reporting on QEMU virt (cross-core reporter)
+        run: make test-arm-latency-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
