@@ -13,6 +13,7 @@
 #include "mmu.h"
 #include "vmem.h"
 #include "kheap.h"
+#include "process.h"
 #include "uart_pl011.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -110,4 +111,44 @@ void m1_selftest(void)
     asid_free(s2);
 
     uart_puts("=== M1 self-test complete ===\r\n\r\n");
+}
+
+/* M2 (issue #11): per-process address spaces.  Creates two processes, checks
+ * that each gets a distinct L0 root with the kernel still reachable and
+ * isolated user space, then tears them down and confirms no frame leak. */
+void m2_process_selftest(void)
+{
+    uart_puts("=== M2 process-isolation self-test (issue #11) ===\r\n");
+
+    size_t baseline = pmm_free_pages();
+
+    process_t *a = process_create("plugin-a");
+    process_t *b = process_create("plugin-b");
+    int created = a && b && (a->pgd_pa != b->pgd_pa) && (a->asid != b->asid);
+    uart_printf("proc  : two distinct address spaces .. %s\r\n", OKBAD(created));
+    if (a && b) {
+        uart_printf("        A pid=%u asid=%u root=%x  B pid=%u asid=%u root=%x\r\n",
+                    (unsigned)a->pid, (unsigned)a->asid, (unsigned)a->pgd_pa,
+                    (unsigned)b->pid, (unsigned)b->asid, (unsigned)b->pgd_pa);
+
+        int kern_ok = mmu_translate(a->pgd, 0xFE201000UL) == 0xFE201000UL &&
+                      mmu_translate(b->pgd, 0xFE201000UL) == 0xFE201000UL;
+        uart_printf("proc  : UART reachable in both ...... %s\r\n", OKBAD(kern_ok));
+
+        uintptr_t fa = phys_alloc_page();
+        uintptr_t fb = phys_alloc_page();
+        process_map(a, fa, USER_VA_BASE, PAGE_SIZE, VMM_READ | VMM_WRITE);
+        process_map(b, fb, USER_VA_BASE, PAGE_SIZE, VMM_READ | VMM_WRITE);
+        int iso = mmu_translate(a->pgd, USER_VA_BASE) == fa &&
+                  mmu_translate(b->pgd, USER_VA_BASE) == fb && fa != fb;
+        uart_printf("proc  : user VA isolated A vs B ..... %s\r\n", OKBAD(iso));
+
+        process_destroy(a);
+        process_destroy(b);
+    }
+
+    int reclaimed = pmm_free_pages() == baseline;
+    uart_printf("proc  : teardown reclaims frames ..... %s\r\n", OKBAD(reclaimed));
+
+    uart_puts("=== M2 self-test complete ===\r\n\r\n");
 }

@@ -74,6 +74,33 @@ int mmu_unmap_page(uint64_t *pgd, uintptr_t va)
     return 0;
 }
 
+uintptr_t mmu_translate(uint64_t *pgd, uintptr_t va)
+{
+    uint64_t e = pgd[IDX(va, 39)];                 /* L0 (always a table) */
+    if (!(e & PTE_VALID))
+        return 0;
+
+    uint64_t *l1 = (uint64_t *)P2V((uintptr_t)(e & PTE_ADDR_MASK));
+    e = l1[IDX(va, 30)];
+    if (!(e & PTE_VALID))
+        return 0;
+    if (!(e & PTE_TABLE))                           /* 1 GiB block */
+        return (uintptr_t)(e & PTE_ADDR_MASK) | (va & 0x3FFFFFFFUL);
+
+    uint64_t *l2 = (uint64_t *)P2V((uintptr_t)(e & PTE_ADDR_MASK));
+    e = l2[IDX(va, 21)];
+    if (!(e & PTE_VALID))
+        return 0;
+    if (!(e & PTE_TABLE))                           /* 2 MiB block */
+        return (uintptr_t)(e & PTE_ADDR_MASK) | (va & 0x1FFFFFUL);
+
+    uint64_t *l3 = (uint64_t *)P2V((uintptr_t)(e & PTE_ADDR_MASK));
+    e = l3[IDX(va, 12)];
+    if (!(e & PTE_VALID))
+        return 0;
+    return (uintptr_t)(e & PTE_ADDR_MASK) | (va & 0xFFFUL);
+}
+
 /* Install a 2 MiB block descriptor (identity) at L2. */
 static int map_block_2m(uintptr_t va, uintptr_t pa, uint64_t attr)
 {

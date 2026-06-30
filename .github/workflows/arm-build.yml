@@ -66,3 +66,13 @@ jobs:
 
       - name: Run M1 host unit tests (ASan + UBSan)
         run: make test-arm-m1
+
+  m2-unit-tests:
+    name: M2 process-isolation host unit tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run M2 host unit tests (ASan + UBSan)
+        run: make test-arm-m2

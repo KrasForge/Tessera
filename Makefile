@@ -878,6 +878,18 @@ test-arm-m1: | $(ARM_BUILD_DIR)
 	      $(ARM_M1_TEST_SRCS) -o $(ARM_M1_TEST_BIN)
 	$(ARM_M1_TEST_BIN)
 
+# Host unit tests for M2 process isolation (issue #11).
+ARM_M2_TEST_SRCS = tests/arm64/m2_process_test.c \
+                   $(ARCH_ARM_DIR)/process.c $(ARCH_ARM_DIR)/pmm.c \
+                   $(ARCH_ARM_DIR)/mmu.c $(ARCH_ARM_DIR)/vmem.c
+ARM_M2_TEST_BIN  = $(ARM_BUILD_DIR)/m2_process_test
+
+test-arm-m2: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_M2_TEST_SRCS) -o $(ARM_M2_TEST_BIN)
+	$(ARM_M2_TEST_BIN)
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
@@ -898,4 +910,4 @@ arm-install-cross:
 	sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
 		qemu-system-arm
 
-.PHONY: arm arm-clean qemu-arm test-arm-m1 arm-install-deps arm-install-cross
+.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 arm-install-deps arm-install-cross
