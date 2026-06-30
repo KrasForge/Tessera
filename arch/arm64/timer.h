@@ -18,7 +18,9 @@
 void timer_init(uint32_t hz);
 
 /* Called from the IRQ dispatcher when TIMER_IRQ fires: reload for the next
- * interval, bump the tick count, and call scheduler_tick(). */
+ * interval and bump the tick count.  The scheduler preemption point
+ * (scheduler_tick, see sched.h) is invoked separately by the dispatcher with
+ * the interrupted task's frame. */
 void timer_tick(void);
 
 /* Total ticks since timer_init(). */
@@ -26,9 +28,5 @@ uint64_t timer_ticks(void);
 
 /* Disable the timer and mask its interrupt. */
 void timer_stop(void);
-
-/* Scheduler hook, called once per tick.  Weak no-op here; the preemptive
- * scheduler (issue #20) provides the strong version. */
-void scheduler_tick(void);
 
 #endif /* ARM64_TIMER_H */

@@ -18,20 +18,25 @@
 #define DMA_AUDIO_IRQ 37u
 __attribute__((weak)) void audio_dma_irq(void) { }
 
+/* Scheduler preemption point (arch/arm64/sched.c).  Weak no-op default so
+ * harnesses that bring up the timer without the scheduler (e.g. the standalone
+ * GIC+timer test) still link. */
+__attribute__((weak)) void scheduler_tick(struct trapframe *tf) { (void)tf; }
+
 void arm64_irq(struct trapframe *tf)
 {
-    (void)tf;
-
     uint32_t iar = gic_ack();
     uint32_t id  = iar & 0x3FF;
 
     if (id >= GIC_SPURIOUS)
         return;                 /* spurious: no handler, no EOI */
 
-    if (id == TIMER_IRQ)
-        timer_tick();
-    else if (id == DMA_AUDIO_IRQ)
+    if (id == TIMER_IRQ) {
+        timer_tick();           /* reload + count                          */
+        scheduler_tick(tf);     /* may preempt: swaps the on-stack frame    */
+    } else if (id == DMA_AUDIO_IRQ) {
         audio_dma_irq();
+    }
     /* other INTIDs: acknowledged and EOI'd below (no-op) */
 
     gic_eoi(iar);

@@ -69,6 +69,23 @@ user_task:
 2:  b       2b
 user_task_end:
 
+/* Preemption task (issue #20).  A CPU-bound busy loop that never makes a
+ * syscall, so it can only leave the CPU by being *preempted* by the timer
+ * IRQ.  x0 = iteration count.  It spins that many times, then sys_exit(0).
+ * Two such NORMAL tasks interleaving, or a REALTIME one running to completion
+ * ahead of them, demonstrates real priority-based preemption. */
+    .global user_busy
+    .global user_busy_end
+user_busy:
+    mov     x19, x0                 /* iteration counter (callee-saved)    */
+1:  subs    x19, x19, #1
+    b.ne    1b                      /* tight loop: no SVC, no yield        */
+    mov     x8, #2                  /* SYS_EXIT                            */
+    mov     x0, #0
+    svc     #0
+2:  b       2b
+user_busy_end:
+
 /* NEON task (issue #15).  The first FP instruction traps (FPEN), the kernel
  * lazily enables FP and restores this task's NEON state, then 2.0+3.0 is
  * computed.  Exits 0 on the correct result, 1 otherwise. */

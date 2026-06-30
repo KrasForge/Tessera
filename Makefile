@@ -1009,7 +1009,8 @@ VIRT_SCHED_ELF  = $(ARM_BUILD_DIR)/virt_sched.elf
 VIRT_SCHED_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
                   $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
                   $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
-                  $(ARCH_ARM_DIR)/sched.c $(ARCH_ARM_DIR)/string.c
+                  $(ARCH_ARM_DIR)/sched.c $(ARCH_ARM_DIR)/runqueue.c \
+                  $(ARCH_ARM_DIR)/string.c
 
 test-arm-sched-qemu: | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/s_start.o
@@ -1031,7 +1032,8 @@ test-arm-sched-qemu: | $(ARM_BUILD_DIR)
 	    $(ARM_BUILD_DIR)/s_pmm.o $(ARM_BUILD_DIR)/s_mmu.o \
 	    $(ARM_BUILD_DIR)/s_vmem.o $(ARM_BUILD_DIR)/s_process.o \
 	    $(ARM_BUILD_DIR)/s_exceptions.o $(ARM_BUILD_DIR)/s_syscalls.o \
-	    $(ARM_BUILD_DIR)/s_sched.o $(ARM_BUILD_DIR)/s_string.o
+	    $(ARM_BUILD_DIR)/s_sched.o $(ARM_BUILD_DIR)/s_runqueue.o \
+	    $(ARM_BUILD_DIR)/s_string.o
 	rm -f $(ARM_BUILD_DIR)/virt_sched.log
 	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
 	    -display none -serial file:$(ARM_BUILD_DIR)/virt_sched.log -net none \
@@ -1197,6 +1199,64 @@ test-arm-timer-qemu: | $(ARM_BUILD_DIR)
 	@grep -q "TIMER: PASS" $(ARM_BUILD_DIR)/virt_timer.log \
 	  && echo "QEMU virt GIC+timer test PASSED" \
 	  || { echo "QEMU virt GIC+timer test FAILED"; exit 1; }
+
+# Host unit tests for the RT-scheduler policy (issue #20): priority ordering,
+# round-robin fairness, idle-only-when-empty, and priority inheritance.  The
+# run queue is pure C, so it runs under ASan/UBSan on the host.
+ARM_RTSCHED_TEST_SRCS = tests/arm64/rtsched_test.c $(ARCH_ARM_DIR)/runqueue.c
+ARM_RTSCHED_TEST_BIN  = $(ARM_BUILD_DIR)/rtsched_test
+
+test-arm-rtsched: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_RTSCHED_TEST_SRCS) -o $(ARM_RTSCHED_TEST_BIN)
+	$(ARM_RTSCHED_TEST_BIN)
+
+# Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
+# AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
+# only leave the CPU by being preempted.  Verifies priority preemption,
+# round-robin interleaving, and idle-only-when-empty.  Uses the virt memory map
+# and the virt GIC bases together.
+VIRT_PREEMPT_FLAGS = $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS)
+VIRT_PREEMPT_ELF   = $(ARM_BUILD_DIR)/virt_preempt.elf
+VIRT_PREEMPT_SRCS  = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                     $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                     $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                     $(ARCH_ARM_DIR)/sched.c $(ARCH_ARM_DIR)/runqueue.c \
+                     $(ARCH_ARM_DIR)/timer.c $(ARCH_ARM_DIR)/irq.c \
+                     $(ARCH_ARM_DIR)/string.c drivers/gic.c
+
+test-arm-preempt-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/p_start.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_PREEMPT_FLAGS) -c $(VIRT_DIR)/uart_virt.c   -o $(ARM_BUILD_DIR)/p_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_PREEMPT_FLAGS) -c $(VIRT_DIR)/preempt_main.c -o $(ARM_BUILD_DIR)/p_main.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S        -o $(ARM_BUILD_DIR)/p_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S          -o $(ARM_BUILD_DIR)/p_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/context_switch.S -o $(ARM_BUILD_DIR)/p_ctx.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/user_demo.S      -o $(ARM_BUILD_DIR)/p_userdemo.o
+	for s in $(VIRT_PREEMPT_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/p_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_PREEMPT_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_PREEMPT_ELF) \
+	    $(ARM_BUILD_DIR)/p_start.o $(ARM_BUILD_DIR)/p_main.o \
+	    $(ARM_BUILD_DIR)/p_uart.o $(ARM_BUILD_DIR)/p_vectors.o \
+	    $(ARM_BUILD_DIR)/p_entry.o $(ARM_BUILD_DIR)/p_ctx.o \
+	    $(ARM_BUILD_DIR)/p_userdemo.o \
+	    $(ARM_BUILD_DIR)/p_pmm.o $(ARM_BUILD_DIR)/p_mmu.o \
+	    $(ARM_BUILD_DIR)/p_vmem.o $(ARM_BUILD_DIR)/p_process.o \
+	    $(ARM_BUILD_DIR)/p_exceptions.o $(ARM_BUILD_DIR)/p_syscalls.o \
+	    $(ARM_BUILD_DIR)/p_sched.o $(ARM_BUILD_DIR)/p_runqueue.o \
+	    $(ARM_BUILD_DIR)/p_timer.o $(ARM_BUILD_DIR)/p_irq.o \
+	    $(ARM_BUILD_DIR)/p_string.o $(ARM_BUILD_DIR)/p_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_preempt.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_preempt.log -net none \
+	    -kernel $(VIRT_PREEMPT_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_preempt.log
+	@grep -q "PREEMPT: PASS" $(ARM_BUILD_DIR)/virt_preempt.log \
+	  && echo "QEMU virt preemptive-scheduler test PASSED" \
+	  || { echo "QEMU virt preemptive-scheduler test FAILED"; exit 1; }
 
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
