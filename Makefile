@@ -925,6 +925,36 @@ test-arm-exc-qemu: | $(ARM_BUILD_DIR)
 	  && echo "QEMU virt exception test PASSED" \
 	  || { echo "QEMU virt exception test FAILED"; exit 1; }
 
+# Runtime EL0 + SVC test on QEMU 'virt' (issue #13).  Boots the REAL entry.S
+# + syscall dispatch + vectors with the MMU off, runs a user program that
+# sys_writes a greeting and sys_exits, and a second that traps on a
+# privileged instruction.
+VIRT_USER_ELF = $(ARM_BUILD_DIR)/virt_user.elf
+
+test-arm-user-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/start_virt.o
+	$(ARM_CC) $(ARM_CFLAGS)  -c $(VIRT_DIR)/uart_virt.c     -o $(ARM_BUILD_DIR)/uart_virt.o
+	$(ARM_CC) $(ARM_CFLAGS)  -c $(VIRT_DIR)/user_main.c     -o $(ARM_BUILD_DIR)/user_main.o
+	$(ARM_CC) $(ARM_CFLAGS)  -c $(ARCH_ARM_DIR)/exceptions.c -o $(ARM_BUILD_DIR)/exceptions_virt.o
+	$(ARM_CC) $(ARM_CFLAGS)  -c $(ARCH_ARM_DIR)/syscalls.c   -o $(ARM_BUILD_DIR)/syscalls_virt.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S    -o $(ARM_BUILD_DIR)/vectors_virt.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S      -o $(ARM_BUILD_DIR)/entry_virt.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/user_demo.S  -o $(ARM_BUILD_DIR)/user_demo_virt.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_USER_ELF) \
+	    $(ARM_BUILD_DIR)/start_virt.o $(ARM_BUILD_DIR)/user_main.o \
+	    $(ARM_BUILD_DIR)/uart_virt.o $(ARM_BUILD_DIR)/exceptions_virt.o \
+	    $(ARM_BUILD_DIR)/syscalls_virt.o $(ARM_BUILD_DIR)/vectors_virt.o \
+	    $(ARM_BUILD_DIR)/entry_virt.o $(ARM_BUILD_DIR)/user_demo_virt.o
+	rm -f $(ARM_BUILD_DIR)/virt_user.log
+	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -display none \
+	    -serial file:$(ARM_BUILD_DIR)/virt_user.log -net none \
+	    -kernel $(VIRT_USER_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_user.log
+	@grep -q "Hello from EL0" $(ARM_BUILD_DIR)/virt_user.log \
+	  && grep -q "VIRT-USER: PASS" $(ARM_BUILD_DIR)/virt_user.log \
+	  && echo "QEMU virt EL0/SVC test PASSED" \
+	  || { echo "QEMU virt EL0/SVC test FAILED"; exit 1; }
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
@@ -945,4 +975,4 @@ arm-install-cross:
 	sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
 		qemu-system-arm
 
-.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc arm-install-deps arm-install-cross
+.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc test-arm-exc-qemu test-arm-user-qemu arm-install-deps arm-install-cross

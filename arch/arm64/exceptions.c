@@ -47,6 +47,9 @@ ec_class_t arm64_ec_class(uint32_t ec)
 
 extern char vectors[];
 
+/* Provided strongly by arch/arm64/syscalls.c (weak default below). */
+void arm64_user_fault(struct trapframe *tf);
+
 /* Recoverable-trap hook used by exceptions_selftest(). */
 static volatile int      g_expect_trap;
 static volatile uint32_t g_trapped_ec;
@@ -120,8 +123,10 @@ void arm64_exception(struct trapframe *tf, unsigned long kind)
     case EC_CLASS_INSTR_ABORT:
         uart_puts("\r\n[exception] memory fault\r\n");
         dump(tf, ec, kind);
-        if (from_el0)
-            uart_puts("  faulting process should be killed (issue #14)\r\n");
+        if (from_el0) {
+            uart_puts("  -> terminating EL0 process\r\n");
+            arm64_user_fault(tf);   /* strong version does not return */
+        }
         halt();
         return;
 
@@ -129,6 +134,10 @@ void arm64_exception(struct trapframe *tf, unsigned long kind)
     default:
         uart_puts("\r\n[exception] unhandled synchronous exception\r\n");
         dump(tf, ec, kind);
+        if (from_el0) {
+            uart_puts("  -> terminating EL0 process\r\n");
+            arm64_user_fault(tf);   /* strong version does not return */
+        }
         halt();
         return;
     }
@@ -141,6 +150,14 @@ __attribute__((weak)) void arm64_handle_svc(struct trapframe *tf)
     uart_printf("  svc    : syscall #%u from EL0 (no handler yet)\r\n",
                 (unsigned)tf->x[8]);
     tf->x[0] = 0;
+}
+
+/* Weak default EL0-fault hook; issue #13 provides a strong version that
+ * terminates the faulting process via kernel_resume().  The weak version
+ * returns, so the caller falls through to halt(). */
+__attribute__((weak)) void arm64_user_fault(struct trapframe *tf)
+{
+    (void)tf;
 }
 
 void exceptions_selftest(void)

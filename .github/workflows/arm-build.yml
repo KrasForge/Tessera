@@ -95,3 +95,6 @@ jobs:
 
       - name: Boot exception harness on QEMU virt (real vectors + dispatch)
         run: make test-arm-exc-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: Boot EL0 + SVC harness on QEMU virt (real entry.S + syscalls)
+        run: make test-arm-user-qemu CROSS_COMPILE=aarch64-linux-gnu-
