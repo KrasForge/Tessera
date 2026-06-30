@@ -18,6 +18,7 @@
 #include "sched.h"
 #include "i2s.h"
 #include "audio_stream.h"
+#include "sine_gen.h"
 #include "uart_pl011.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -333,4 +334,24 @@ void m3_dma_audio_selftest(void)
 
     uart_puts("dma   : streamed via DMA ring (continuous on a PCM5102 DAC)\r\n");
     uart_puts("=== M3 DMA-audio self-test complete ===\r\n\r\n");
+}
+
+/* M3 (issue #18): sine-tone generator, the audio "hello world". */
+void m3_sine_selftest(void)
+{
+    uart_puts("=== M3 sine-generator self-test (issue #18) ===\r\n");
+
+    audio_sine_start(440);
+    uart_puts("sine  : 440 Hz tone started (DMA backend)\r\n");
+    for (int i = 0; i < 8; i++)
+        audio_sine_service();
+
+    /* Runtime, phase-continuous frequency change: no click. */
+    audio_sine_set_freq(660);
+    uart_puts("sine  : frequency changed to 660 Hz (phase-continuous)\r\n");
+    for (int i = 0; i < 8; i++)
+        audio_sine_service();
+
+    audio_sine_stop();
+    uart_puts("=== M3 sine-generator self-test complete ===\r\n\r\n");
 }
