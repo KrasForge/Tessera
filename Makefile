@@ -1246,6 +1246,16 @@ test-arm-elf: | $(ARM_BUILD_DIR)
 	      $(ARM_ELF_TEST_SRCS) -o $(ARM_ELF_TEST_BIN)
 	$(ARM_ELF_TEST_BIN)
 
+# Host unit tests for the shared audio ring buffer (issue #25).
+ARM_RINGBUF_TEST_SRCS = tests/arm64/ringbuf_test.c $(ARCH_ARM_DIR)/audio_ringbuf.c
+ARM_RINGBUF_TEST_BIN  = $(ARM_BUILD_DIR)/ringbuf_test
+
+test-arm-ringbuf: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) \
+	      $(ARM_RINGBUF_TEST_SRCS) -o $(ARM_RINGBUF_TEST_BIN) -lpthread
+	$(ARM_RINGBUF_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -1340,6 +1350,64 @@ test-arm-plugin-load-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plu
 	@grep -q "PLUGIN-LOAD: PASS" $(ARM_BUILD_DIR)/virt_plugin.log \
 	  && echo "QEMU virt plugin-loader test PASSED" \
 	  || { echo "QEMU virt plugin-loader test FAILED"; exit 1; }
+
+# ---- M5: shared-memory audio ring buffer (issue #25) ----------------------
+# Plugins that read/write the shared ring link the (FP-enabled) ring code.
+$(ARM_BUILD_DIR)/arb_plugin.o: $(ARCH_ARM_DIR)/audio_ringbuf.c | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $@
+
+$(ARM_BUILD_DIR)/plugin_producer.elf: plugins/example_producer/producer.c \
+                                      $(ARM_BUILD_DIR)/arb_plugin.o $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/producer.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/producer.o $(ARM_BUILD_DIR)/arb_plugin.o
+
+$(ARM_BUILD_DIR)/plugin_crasher.elf: plugins/example_crasher/crasher.c \
+                                     $(ARM_BUILD_DIR)/arb_plugin.o $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/crasher.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/crasher.o $(ARM_BUILD_DIR)/arb_plugin.o
+
+# The harness main verifies float ramps, so it is built WITH FP (the kernel
+# objects stay -mgeneral-regs-only; mixing is ABI-compatible at link time).
+HARNESS_FP_CFLAGS = -mcpu=$(ARM_CPU) -ffreestanding -fno-pic -fno-pie -fno-builtin \
+                    -Wall -Wextra -std=c11 -O2 -g -I$(ARCH_ARM_DIR) -Iplugins -Iinclude
+
+VIRT_RING_ELF  = $(ARM_BUILD_DIR)/virt_ring.elf
+VIRT_RING_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                 $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                 $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                 $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                 $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/string.c
+
+test-arm-ring-share-qemu: $(ARM_BUILD_DIR)/plugin_producer.elf $(ARM_BUILD_DIR)/plugin_crasher.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/rs_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/rs_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/rs_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/rs_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/ring_blob.S            -o $(ARM_BUILD_DIR)/rs_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/rs_uart.o
+	$(ARM_CC) $(HARNESS_FP_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/ringshare_main.c -o $(ARM_BUILD_DIR)/rs_main.o
+	for s in $(VIRT_RING_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/rs_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_RING_ELF) \
+	    $(ARM_BUILD_DIR)/rs_start.o $(ARM_BUILD_DIR)/rs_main.o \
+	    $(ARM_BUILD_DIR)/rs_uart.o $(ARM_BUILD_DIR)/rs_vectors.o \
+	    $(ARM_BUILD_DIR)/rs_entry.o $(ARM_BUILD_DIR)/rs_tramp.o \
+	    $(ARM_BUILD_DIR)/rs_blob.o \
+	    $(ARM_BUILD_DIR)/rs_pmm.o $(ARM_BUILD_DIR)/rs_mmu.o \
+	    $(ARM_BUILD_DIR)/rs_vmem.o $(ARM_BUILD_DIR)/rs_process.o \
+	    $(ARM_BUILD_DIR)/rs_exceptions.o $(ARM_BUILD_DIR)/rs_syscalls.o \
+	    $(ARM_BUILD_DIR)/rs_elf64.o $(ARM_BUILD_DIR)/rs_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/rs_audio_ringbuf.o $(ARM_BUILD_DIR)/rs_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_ring.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_ring.log -net none \
+	    -kernel $(VIRT_RING_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_ring.log
+	@grep -q "RING-SHARE: PASS" $(ARM_BUILD_DIR)/virt_ring.log \
+	  && echo "QEMU virt shared-ring test PASSED" \
+	  || { echo "QEMU virt shared-ring test FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can

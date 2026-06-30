@@ -122,6 +122,13 @@ int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name)
     return PLUGIN_OK;
 }
 
+int plugin_map_region(plugin_t *pl, uint64_t va, uintptr_t pa, size_t bytes,
+                      unsigned flags)
+{
+    size_t mapped = (bytes + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    return process_map(pl->proc, pa, va, mapped, flags);
+}
+
 long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size)
 {
     /* Param block layout shared with plugin_trampoline.S. */

@@ -219,6 +219,25 @@ jobs:
       - name: Load plugin into isolated address space on QEMU virt (+ MMU kill)
         run: make test-arm-plugin-load-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  shared-ring-tests:
+    name: M5 shared ring - lock-free host test + QEMU virt zero-syscall path
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Shared ring-buffer host unit tests (lock-free + crash, ASan + UBSan)
+        run: make test-arm-ringbuf
+
+      - name: Shared ring between host and plugin on QEMU virt (zero syscalls/block)
+        run: make test-arm-ring-share-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
