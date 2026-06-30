@@ -320,6 +320,12 @@ jobs:
       - name: Control syscalls on QEMU virt (leak-free load/unload, set-param, EL0)
         run: make test-arm-control-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Live parameter changes host test (click-free, overflow, latency)
+        run: make test-arm-param-live
+
+      - name: Live parameter modulation on QEMU virt (no audio dropout)
+        run: make test-arm-param-live-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   midi-tests:
     name: M7 MIDI input - parser host test + QEMU virt listener
     runs-on: ubuntu-22.04
