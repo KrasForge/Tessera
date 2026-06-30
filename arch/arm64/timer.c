@@ -11,9 +11,6 @@ static uint64_t          g_interval;   /* counter ticks per scheduler tick */
 static uint64_t          g_deadline;   /* absolute CNTP_CVAL of next tick   */
 static volatile uint64_t g_ticks;
 
-/* Weak default; the preemptive scheduler (issue #20) overrides this. */
-__attribute__((weak)) void scheduler_tick(void) { }
-
 void timer_init(uint32_t hz)
 {
     uint64_t freq, now;
@@ -33,11 +30,13 @@ void timer_init(uint32_t hz)
 
 void timer_tick(void)
 {
-    /* Advance the deadline by a fixed interval: jitter-free 1 kHz. */
+    /* Advance the deadline by a fixed interval: jitter-free 1 kHz.  The
+     * scheduler preemption point is driven from the IRQ dispatcher (irq.c),
+     * which holds the interrupted task's register frame; this routine only
+     * reloads the compare value and counts the tick. */
     g_deadline += g_interval;
     __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(g_deadline));
     g_ticks++;
-    scheduler_tick();
 }
 
 uint64_t timer_ticks(void)
