@@ -1170,6 +1170,34 @@ test-arm-sine-qemu: | $(ARM_BUILD_DIR)
 	  && echo "QEMU virt sine-generator smoke test PASSED" \
 	  || { echo "QEMU virt sine-generator smoke test FAILED"; exit 1; }
 
+# GIC + generic-timer test on QEMU 'virt' (issue #19): real timer interrupts
+# at 1 kHz through the emulated GICv2.  Uses the virt GIC base addresses.
+VIRT_GIC_FLAGS = -DGIC_DIST_BASE=0x08000000UL -DGIC_CPU_BASE=0x08010000UL
+VIRT_TIMER_ELF = $(ARM_BUILD_DIR)/virt_timer.elf
+
+test-arm-timer-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/tm_start.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c  -o $(ARM_BUILD_DIR)/tm_uart.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/timer_main.c -o $(ARM_BUILD_DIR)/tm_main.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S    -o $(ARM_BUILD_DIR)/tm_vectors.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(ARCH_ARM_DIR)/exceptions.c -o $(ARM_BUILD_DIR)/tm_exceptions.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(ARCH_ARM_DIR)/irq.c   -o $(ARM_BUILD_DIR)/tm_irq.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(ARCH_ARM_DIR)/timer.c -o $(ARM_BUILD_DIR)/tm_timer.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c drivers/gic.c           -o $(ARM_BUILD_DIR)/tm_gic.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_TIMER_ELF) \
+	    $(ARM_BUILD_DIR)/tm_start.o $(ARM_BUILD_DIR)/tm_main.o \
+	    $(ARM_BUILD_DIR)/tm_uart.o $(ARM_BUILD_DIR)/tm_vectors.o \
+	    $(ARM_BUILD_DIR)/tm_exceptions.o $(ARM_BUILD_DIR)/tm_irq.o \
+	    $(ARM_BUILD_DIR)/tm_timer.o $(ARM_BUILD_DIR)/tm_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_timer.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_timer.log -net none \
+	    -kernel $(VIRT_TIMER_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_timer.log
+	@grep -q "TIMER: PASS" $(ARM_BUILD_DIR)/virt_timer.log \
+	  && echo "QEMU virt GIC+timer test PASSED" \
+	  || { echo "QEMU virt GIC+timer test FAILED"; exit 1; }
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
