@@ -143,6 +143,25 @@ jobs:
       - name: Preemptive scheduler test on QEMU virt (priority + round-robin)
         run: make test-arm-preempt-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  audio-core-tests:
+    name: M4 audio core - SMP affinity + lock-free ring on QEMU virt
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Audio-core host unit tests (lock-free ring + watchdog, ASan + UBSan)
+        run: make test-arm-smp
+
+      - name: Dedicated audio-core SMP test on QEMU virt (4 cores via PSCI)
+        run: make test-arm-smp-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
