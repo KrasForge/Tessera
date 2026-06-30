@@ -19,6 +19,13 @@
  * standalone EL0 virt harness); process.c provides the strong version. */
 __attribute__((weak)) process_t *current_process(void) { return (process_t *)0; }
 
+/* Scheduler hooks (issue #15).  Weak no-op defaults keep the single-process
+ * harnesses linkable; arch/arm64/sched.c provides the strong versions. */
+__attribute__((weak)) int  sched_active(void) { return 0; }
+__attribute__((weak)) void sched_yield(struct trapframe *tf) { (void)tf; }
+__attribute__((weak)) void sched_exit(struct trapframe *tf, long code) { (void)tf; (void)code; }
+__attribute__((weak)) void sched_kill(struct trapframe *tf) { (void)tf; }
+
 void arm64_handle_svc(struct trapframe *tf)
 {
     uint64_t num = tf->x[8];
@@ -36,8 +43,15 @@ void arm64_handle_svc(struct trapframe *tf)
         break;
     }
     case SYS_EXIT:
-        kernel_resume((long)tf->x[0]);   /* unwinds to run_user; no return */
-        break;                           /* unreachable                    */
+        if (sched_active())
+            sched_exit(tf, (long)tf->x[0]);   /* switch to next task / unwind */
+        else
+            kernel_resume((long)tf->x[0]);    /* unwinds to run_user          */
+        break;                                /* unreachable                  */
+
+    case SYS_YIELD:
+        sched_yield(tf);   /* swaps in the next task's frame (no-op if alone) */
+        break;
 
     default:
         tf->x[0] = (uint64_t)-1;         /* ENOSYS */
@@ -64,5 +78,8 @@ void arm64_user_fault(struct trapframe *tf)
                     arm64_abort_is_write(tf->esr_el1) ? "write" : "read");
     uart_puts("\r\n");
 
-    kernel_resume(-1);
+    if (sched_active())
+        sched_kill(tf);     /* switch to the next task, or unwind if last */
+    else
+        kernel_resume(-1);  /* single-process: unwind to run_user         */
 }
