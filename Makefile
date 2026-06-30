@@ -890,6 +890,41 @@ test-arm-m2: | $(ARM_BUILD_DIR)
 	      $(ARM_M2_TEST_SRCS) -o $(ARM_M2_TEST_BIN)
 	$(ARM_M2_TEST_BIN)
 
+# Host unit tests for the exception ESR decoder (issue #12).
+ARM_EXC_TEST_SRCS = tests/arm64/exception_test.c $(ARCH_ARM_DIR)/exceptions.c
+ARM_EXC_TEST_BIN  = $(ARM_BUILD_DIR)/exception_test
+
+test-arm-exc: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_EXC_TEST_SRCS) -o $(ARM_EXC_TEST_BIN)
+	$(ARM_EXC_TEST_BIN)
+
+# Runtime exception test on the QEMU 'virt' board (available in every QEMU,
+# unlike raspi4b).  Boots the REAL vectors.S + exceptions.c, traps a
+# recoverable undefined instruction, and greps the serial log.
+VIRT_DIR     = tests/arm64/virt
+VIRT_ELF     = $(ARM_BUILD_DIR)/virt_exc.elf
+
+test-arm-exc-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/start_virt.o
+	$(ARM_CC) $(ARM_CFLAGS)  -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/uart_virt.o
+	$(ARM_CC) $(ARM_CFLAGS)  -c $(VIRT_DIR)/test_main.c -o $(ARM_BUILD_DIR)/test_main.o
+	$(ARM_CC) $(ARM_CFLAGS)  -c $(ARCH_ARM_DIR)/exceptions.c -o $(ARM_BUILD_DIR)/exceptions_virt.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S -o $(ARM_BUILD_DIR)/vectors_virt.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_ELF) \
+	    $(ARM_BUILD_DIR)/start_virt.o $(ARM_BUILD_DIR)/test_main.o \
+	    $(ARM_BUILD_DIR)/uart_virt.o $(ARM_BUILD_DIR)/exceptions_virt.o \
+	    $(ARM_BUILD_DIR)/vectors_virt.o
+	rm -f $(ARM_BUILD_DIR)/virt_exc.log
+	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -display none \
+	    -serial file:$(ARM_BUILD_DIR)/virt_exc.log -net none \
+	    -kernel $(VIRT_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_exc.log
+	@grep -q "caught+recovered" $(ARM_BUILD_DIR)/virt_exc.log \
+	  && echo "QEMU virt exception test PASSED" \
+	  || { echo "QEMU virt exception test FAILED"; exit 1; }
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
@@ -910,4 +945,4 @@ arm-install-cross:
 	sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
 		qemu-system-arm
 
-.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 arm-install-deps arm-install-cross
+.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc arm-install-deps arm-install-cross

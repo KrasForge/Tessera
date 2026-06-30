@@ -76,3 +76,22 @@ jobs:
 
       - name: Run M2 host unit tests (ASan + UBSan)
         run: make test-arm-m2
+
+  exception-tests:
+    name: Exception handling — host decode + QEMU virt boot
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: ESR decoder host unit tests (ASan + UBSan)
+        run: make test-arm-exc
+
+      - name: Boot exception harness on QEMU virt (real vectors + dispatch)
+        run: make test-arm-exc-qemu CROSS_COMPILE=aarch64-linux-gnu-

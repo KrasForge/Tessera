@@ -19,6 +19,7 @@
 #include "pmm.h"
 #include "mmu.h"
 #include "kheap.h"
+#include "exceptions.h"
 #include <stdint.h>
 
 /* Self-tests (arch/arm64/selftest.c). */
@@ -59,6 +60,10 @@ void kmain(void)
     el >>= 2;
     uart_printf("Running at EL%u\r\n", (unsigned)el);
 
+    /* Install the exception vector table before anything can fault. */
+    exceptions_init();
+    uart_puts("VBAR : exception vectors installed\r\n");
+
     /* ---- M1: virtual memory bring-up -------------------------------- */
     pmm_init();
     uart_printf("PMM : %u MiB managed RAM, %u free frames\r\n",
@@ -71,6 +76,7 @@ void kmain(void)
     kheap_init();
     uart_puts("KHEAP: initialised\r\n");
 
+    exceptions_selftest();
     m1_selftest();
     m2_process_selftest();
 
