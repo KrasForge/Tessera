@@ -1632,6 +1632,34 @@ test-arm-graph-ctl-qemu: $(ARM_BUILD_DIR)/plugin_controller.elf
 	  && echo "QEMU virt graph-control test PASSED" \
 	  || { echo "QEMU virt graph-control test FAILED"; exit 1; }
 
+# ---- M7: MIDI input (issue #31) -------------------------------------------
+# Host unit tests for the MIDI parser and event ring.
+ARM_MIDI_TEST_SRCS = tests/arm64/midi_test.c $(ARCH_ARM_DIR)/midi.c
+test-arm-midi: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_MIDI_TEST_SRCS) -o $(ARM_BUILD_DIR)/midi_test
+	$(ARM_BUILD_DIR)/midi_test
+
+# MIDI listener on QEMU 'virt': feed a byte stream through the parser into the
+# event ring and log the decoded events over the UART.
+VIRT_MIDI_ELF = $(ARM_BUILD_DIR)/virt_midi.elf
+test-arm-midi-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/md_start.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/md_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) -c $(VIRT_DIR)/midi_main.c -o $(ARM_BUILD_DIR)/md_main.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(ARCH_ARM_DIR)/midi.c -o $(ARM_BUILD_DIR)/md_midi.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_MIDI_ELF) \
+	    $(ARM_BUILD_DIR)/md_start.o $(ARM_BUILD_DIR)/md_main.o \
+	    $(ARM_BUILD_DIR)/md_uart.o $(ARM_BUILD_DIR)/md_midi.o
+	rm -f $(ARM_BUILD_DIR)/virt_midi.log
+	-timeout 15 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_midi.log -net none \
+	    -kernel $(VIRT_MIDI_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_midi.log
+	@grep -q "MIDI: PASS" $(ARM_BUILD_DIR)/virt_midi.log \
+	  && echo "QEMU virt MIDI listener test PASSED" \
+	  || { echo "QEMU virt MIDI listener test FAILED"; exit 1; }
+
 # ---- M7: control syscalls (issue #30) -------------------------------------
 # Host unit test for the lock-free parameter queue.
 ARM_PQ_TEST_SRCS = tests/arm64/param_queue_test.c $(ARCH_ARM_DIR)/param_queue.c
