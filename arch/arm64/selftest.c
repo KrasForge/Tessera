@@ -16,6 +16,7 @@
 #include "process.h"
 #include "usermode.h"
 #include "sched.h"
+#include "i2s.h"
 #include "uart_pl011.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -288,4 +289,16 @@ void m2_sched_selftest(void)
     process_destroy(f);
 
     uart_puts("=== M2 context-switch complete ===\r\n\r\n");
+}
+
+/* M3 (issue #16): bring up the I2S DAC output and play a short 440 Hz tone.
+ * Audible on a connected PCM5102; under emulation the writes are harmless. */
+void m3_audio_selftest(void)
+{
+    uart_puts("=== M3 audio self-test (issue #16) ===\r\n");
+    i2s_init(48000);
+    uart_puts("audio : I2S master @ 48 kHz initialised\r\n");
+    i2s_play_tone(440, 480);   /* ~10 ms of 440 Hz */
+    uart_puts("audio : played 440 Hz tone (audible on a PCM5102 DAC)\r\n");
+    uart_puts("=== M3 audio self-test complete ===\r\n\r\n");
 }
