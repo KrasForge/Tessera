@@ -69,6 +69,16 @@ int audio_graph_connect(audio_graph_t *g, int src, int dst);
 /* Attach the kernel-allocated ring buffer to an edge. */
 void audio_graph_set_edge_ring(audio_graph_t *g, int edge, void *ring);
 
+/* Node index for a plugin PID (or the DAC when pid == 0), or -1 if none. */
+int audio_graph_node_by_pid(const audio_graph_t *g, uint32_t pid);
+
+/* Edge index for the src->dst pair, or -1 if there is no such edge. */
+int audio_graph_find_edge(const audio_graph_t *g, int src, int dst);
+
+/* Remove the src->dst edge.  Returns the (now freed) edge's ring pointer so the
+ * caller can release it, or NULL if there was no such edge. */
+void *audio_graph_disconnect(audio_graph_t *g, int src, int dst);
+
 /* Topologically sort the nodes into `order` (capacity `max`), producers before
  * consumers and the DAC last.  Returns the number of nodes written, or -1 if
  * the graph has a cycle or `max` is too small. */

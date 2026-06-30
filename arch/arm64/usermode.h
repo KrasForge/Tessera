@@ -19,6 +19,17 @@ struct trapframe;
 #define SYS_EXIT   2   /* (code) -> does not return; unwinds to run_user  */
 #define SYS_YIELD  3   /* () -> cooperatively switch to the next task     */
 
+/* Audio-graph control plane (issue #28), callable from the host process. */
+#define SYS_GRAPH_CONNECT    4  /* (src_pid, dst_pid) -> 0 or negative error */
+#define SYS_GRAPH_DISCONNECT 5  /* (src_pid, dst_pid) -> 0 or negative error */
+#define SYS_GRAPH_LIST       6  /* () -> current edge count                  */
+
+/* Control-plane handlers; weak defaults in syscalls.c return -1, the graph
+ * control plane provides the strong versions. */
+long sys_graph_connect(uint32_t src_pid, uint32_t dst_pid);
+long sys_graph_disconnect(uint32_t src_pid, uint32_t dst_pid);
+long sys_graph_list(void);
+
 /* Drop to EL0 and run a process until it exits (or faults).
  *
  *   entry    - EL0 entry point (virtual address in the process space)

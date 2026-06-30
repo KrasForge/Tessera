@@ -276,6 +276,25 @@ jobs:
       - name: Multi-plugin graph processes in topological order on QEMU virt
         run: make test-arm-graph-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  graph-control-tests:
+    name: M6 graph control - control-plane host test + QEMU virt syscalls
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Graph control-plane host unit tests (connect/disconnect/list, ASan + UBSan)
+        run: make test-arm-graph-control
+
+      - name: Runtime graph rewire via syscalls from EL0 on QEMU virt
+        run: make test-arm-graph-ctl-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04

@@ -21,4 +21,10 @@
 #define RING_NBLOCKS 8u        /* blocks the producer writes  */
 #define RING_FRAMES  (RING_BLOCK * RING_NBLOCKS)   /* ring capacity (pow2) */
 
+/* Control-plane test contract (issue #28): a results page the EL0 controller
+ * writes its syscall return values into, and the node PIDs it wires. */
+#define RESULTS_VA       (0x8000000000ull + 0x0D000000ull)
+#define GRAPH_SYNTH_PID  7u
+#define GRAPH_DAC_PID    0u     /* the DAC sink is node pid 0 */
+
 #endif /* TESSERA_RING_CONTRACT_H */

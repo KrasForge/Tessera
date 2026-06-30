@@ -95,6 +95,39 @@ void audio_graph_set_edge_ring(audio_graph_t *g, int edge, void *ring)
         g->edges[edge].ring = ring;
 }
 
+int audio_graph_node_by_pid(const audio_graph_t *g, uint32_t pid)
+{
+    for (int i = 0; i < GRAPH_MAX_NODES; i++) {
+        if (g->nodes[i].type == NODE_UNUSED)
+            continue;
+        if (pid == 0 && g->nodes[i].type == NODE_DAC)
+            return i;
+        if (pid != 0 && g->nodes[i].type == NODE_PLUGIN && g->nodes[i].pid == pid)
+            return i;
+    }
+    return -1;
+}
+
+int audio_graph_find_edge(const audio_graph_t *g, int src, int dst)
+{
+    for (int e = 0; e < GRAPH_MAX_EDGES; e++)
+        if (g->edges[e].used && g->edges[e].src == src && g->edges[e].dst == dst)
+            return e;
+    return -1;
+}
+
+void *audio_graph_disconnect(audio_graph_t *g, int src, int dst)
+{
+    int e = audio_graph_find_edge(g, src, dst);
+    if (e < 0)
+        return (void *)0;
+    void *ring = g->edges[e].ring;
+    g->edges[e].used = 0;
+    g->edges[e].ring = (void *)0;
+    g->n_edges--;
+    return ring;
+}
+
 /* Kahn's algorithm.  Produces a topological order; afterward the DAC node is
  * forced to the very end (it is a sink, so nothing depends on it and moving it
  * last never violates the ordering). */
