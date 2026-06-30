@@ -955,6 +955,48 @@ test-arm-user-qemu: | $(ARM_BUILD_DIR)
 	  && echo "QEMU virt EL0/SVC test PASSED" \
 	  || { echo "QEMU virt EL0/SVC test FAILED"; exit 1; }
 
+# Full-stack fault-containment test on QEMU 'virt' (issue #14).  Builds the
+# REAL pmm/mmu/vmem/process/exception/syscall stack with the virt memory map
+# and the MMU ENABLED, so the hardware enforces the kernel/user split: a
+# process that writes to kernel memory is trapped and killed, the kernel data
+# stays intact, and a second process runs normally.
+VIRT_MMU_FLAGS = -DPHYS_RAM_START=0x40000000UL -DPHYS_RAM_END=0x48000000UL \
+                 -DMMIO_BASE=0x08000000UL -DMMIO_END=0x10000000UL
+VIRT_FAULT_ELF = $(ARM_BUILD_DIR)/virt_fault.elf
+VIRT_FAULT_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                  $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                  $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                  $(ARCH_ARM_DIR)/string.c
+
+test-arm-fault-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/f_start.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c  -o $(ARM_BUILD_DIR)/f_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/fault_main.c -o $(ARM_BUILD_DIR)/f_main.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S   -o $(ARM_BUILD_DIR)/f_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S     -o $(ARM_BUILD_DIR)/f_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/user_demo.S -o $(ARM_BUILD_DIR)/f_userdemo.o
+	for s in $(VIRT_FAULT_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/f_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_FAULT_ELF) \
+	    $(ARM_BUILD_DIR)/f_start.o $(ARM_BUILD_DIR)/f_main.o \
+	    $(ARM_BUILD_DIR)/f_uart.o $(ARM_BUILD_DIR)/f_vectors.o \
+	    $(ARM_BUILD_DIR)/f_entry.o $(ARM_BUILD_DIR)/f_userdemo.o \
+	    $(ARM_BUILD_DIR)/f_pmm.o $(ARM_BUILD_DIR)/f_mmu.o \
+	    $(ARM_BUILD_DIR)/f_vmem.o $(ARM_BUILD_DIR)/f_process.o \
+	    $(ARM_BUILD_DIR)/f_exceptions.o $(ARM_BUILD_DIR)/f_syscalls.o \
+	    $(ARM_BUILD_DIR)/f_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_fault.log
+	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_fault.log -net none \
+	    -kernel $(VIRT_FAULT_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_fault.log
+	@grep -q "Hello from EL0" $(ARM_BUILD_DIR)/virt_fault.log \
+	  && grep -q "VIRT-FAULT: PASS" $(ARM_BUILD_DIR)/virt_fault.log \
+	  && echo "QEMU virt fault-containment test PASSED" \
+	  || { echo "QEMU virt fault-containment test FAILED"; exit 1; }
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
@@ -975,4 +1017,4 @@ arm-install-cross:
 	sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
 		qemu-system-arm
 
-.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc test-arm-exc-qemu test-arm-user-qemu arm-install-deps arm-install-cross
+.PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc test-arm-exc-qemu test-arm-user-qemu test-arm-fault-qemu arm-install-deps arm-install-cross

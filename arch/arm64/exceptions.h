@@ -43,6 +43,12 @@ typedef enum {
 const char *arm64_ec_name(uint32_t ec);
 ec_class_t  arm64_ec_class(uint32_t ec);
 
+/* Abort-syndrome decoders (valid for data/instruction abort EC values).
+ * WnR (write-not-read) is bit 6 of a data-abort ISS; the 6-bit fault status
+ * code (DFSC/IFSC) is ESR[5:0]. */
+int      arm64_abort_is_write(uint64_t esr);
+uint32_t arm64_abort_fsc(uint64_t esr);
+
 /* Install the vector table in VBAR_EL1.  Call before any user code runs. */
 void exceptions_init(void);
 

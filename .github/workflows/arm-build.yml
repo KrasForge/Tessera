@@ -98,3 +98,6 @@ jobs:
 
       - name: Boot EL0 + SVC harness on QEMU virt (real entry.S + syscalls)
         run: make test-arm-user-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: Boot fault-containment harness on QEMU virt (MMU enforced)
+        run: make test-arm-fault-qemu CROSS_COMPILE=aarch64-linux-gnu-

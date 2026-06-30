@@ -10,16 +10,18 @@
 #include "pmem.h"
 #include "mmu.h"
 #include "vmem.h"
+#include "usermode.h"
 #include <stdint.h>
 #include <stddef.h>
 
 #define MAX_PROCESSES   64
 #define PTE_PER_TABLE   512
-/* L0 index of the first user entry — everything below it is shared kernel. */
+/* L0 index of the first user entry: everything below it is shared kernel. */
 #define USER_L0_FIRST   (USER_VA_BASE >> 39)   /* == 1 */
 
 static process_t g_proc[MAX_PROCESSES];
 static uint32_t  g_next_pid = 1;
+static process_t *g_current;    /* process currently at EL0, or NULL */
 
 static void copy_name(char *dst, const char *src)
 {
@@ -133,3 +135,33 @@ size_t process_count(void)
             n++;
     return n;
 }
+
+process_t *current_process(void)
+{
+    return g_current;
+}
+
+#ifndef HOSTTEST   /* process_run drops to EL0 (entry.S) and touches TTBR0 */
+long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
+{
+    if (!p || p->state == PROC_UNUSED)
+        return -1;
+
+    /* Preserve the kernel's TTBR0 so we can restore it after the process
+     * exits or is killed. */
+    uint64_t kttbr;
+    __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(kttbr));
+
+    g_current = p;
+    p->state  = PROC_RUNNING;
+
+    long code = run_user(entry, user_sp, p->ttbr0, arg0);
+
+    __asm__ volatile("msr ttbr0_el1, %0; isb" :: "r"(kttbr));
+    g_current = (process_t *)0;
+
+    p->exit_code = code;
+    p->state = (code < 0) ? PROC_KILLED : PROC_ZOMBIE;
+    return code;
+}
+#endif /* !HOSTTEST */

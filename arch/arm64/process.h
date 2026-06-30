@@ -30,7 +30,8 @@ typedef enum {
     PROC_UNUSED = 0,
     PROC_READY,
     PROC_RUNNING,
-    PROC_ZOMBIE,
+    PROC_ZOMBIE,    /* exited normally    */
+    PROC_KILLED,    /* terminated by a fault */
 } proc_state_t;
 
 /* Process control block.  Holds the physical address of the L0 root and the
@@ -42,6 +43,7 @@ typedef struct process {
     uintptr_t    pgd_pa;   /* physical address of the L0 root (TTBR0_EL1)   */
     uint64_t    *pgd;      /* dereferenceable pointer to the L0 root         */
     uint64_t     ttbr0;    /* TTBR0_EL1 value: pgd_pa | (asid << 48)         */
+    long         exit_code; /* sys_exit value, or -1 if killed by a fault   */
     char         name[16];
 } process_t;
 
@@ -63,5 +65,15 @@ int process_map(process_t *p, uintptr_t pa, uintptr_t va, size_t size,
 
 /* Number of live (non-UNUSED) processes. */
 size_t process_count(void);
+
+/* Run process p at EL0 starting at `entry` with stack `user_sp`; `arg0` is
+ * passed in the user's x0.  Installs the process address space, runs until
+ * the process exits or faults, restores the kernel address space, records
+ * the exit code, and sets the state to PROC_ZOMBIE (clean exit) or
+ * PROC_KILLED (fault).  Returns the exit code (-1 if killed). */
+long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0);
+
+/* The process currently executing at EL0 (NULL if in the kernel). */
+process_t *current_process(void);
 
 #endif /* ARM64_PROCESS_H */

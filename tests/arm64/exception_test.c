@@ -50,6 +50,13 @@ int main(void)
     CHECK(arm64_ec_name(EC_SVC_A64)[0] != '\0', "SVC has a name");
     CHECK(arm64_ec_name(EC_UNKNOWN)[0] != '\0', "undefined has a name");
 
+    /* Abort syndrome decode (issue #14). */
+    CHECK(arm64_abort_is_write(1ull << 6) == 1, "WnR=1 decoded as write");
+    CHECK(arm64_abort_is_write(0) == 0, "WnR=0 decoded as read");
+    CHECK(arm64_abort_fsc(0x9200004e) == 0x0e, "fault status code = ESR[5:0]");
+    CHECK(arm64_abort_is_write(0x9200004e) == 1,
+          "real data-abort ESR decodes as a write");
+
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;
 }

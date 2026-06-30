@@ -10,7 +10,8 @@
 
     .section .text
 
-/* long run_user(uint64_t entry x0, uint64_t user_sp x1, uint64_t ttbr0 x2) */
+/* long run_user(uint64_t entry x0, uint64_t user_sp x1, uint64_t ttbr0 x2,
+ *               uint64_t arg0 x3)  -- arg0 is placed in the user's x0. */
     .global run_user
 run_user:
     adrp    x9, g_kresume
@@ -35,11 +36,13 @@ run_user:
     dsb     ish
     isb
 
-    /* Enter EL0: ELR = entry, SPSR = EL0t with DAIF masked, SP_EL0 = stack. */
+    /* Enter EL0: ELR = entry, SPSR = EL0t with DAIF masked, SP_EL0 = stack,
+     * and pass arg0 in the user's x0. */
     msr     elr_el1, x0
     mov     x10, #0x3C0
     msr     spsr_el1, x10
     msr     sp_el0, x1
+    mov     x0, x3
     eret
 
 /* void kernel_resume(long code x0) — restore kernel context; run_user()
