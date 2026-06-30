@@ -1256,6 +1256,17 @@ test-arm-ringbuf: | $(ARM_BUILD_DIR)
 	      $(ARM_RINGBUF_TEST_SRCS) -o $(ARM_RINGBUF_TEST_BIN) -lpthread
 	$(ARM_RINGBUF_TEST_BIN)
 
+# Host unit tests for the resilient audio host (issue #26).
+ARM_HOST_TEST_SRCS = tests/arm64/plugin_host_test.c $(ARCH_ARM_DIR)/plugin_host.c \
+                     $(ARCH_ARM_DIR)/audio_ringbuf.c
+ARM_HOST_TEST_BIN  = $(ARM_BUILD_DIR)/plugin_host_test
+
+test-arm-plugin-host: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) \
+	      $(ARM_HOST_TEST_SRCS) -o $(ARM_HOST_TEST_BIN)
+	$(ARM_HOST_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -1408,6 +1419,65 @@ test-arm-ring-share-qemu: $(ARM_BUILD_DIR)/plugin_producer.elf $(ARM_BUILD_DIR)/
 	@grep -q "RING-SHARE: PASS" $(ARM_BUILD_DIR)/virt_ring.log \
 	  && echo "QEMU virt shared-ring test PASSED" \
 	  || { echo "QEMU virt shared-ring test FAILED"; exit 1; }
+
+# ---- M5: resilient plugin host (issue #26) --------------------------------
+# Sine plugins (normal + crashing) link the FP ring code and the sine generator.
+$(ARM_BUILD_DIR)/plugin_sine.elf: plugins/example_sine/sine.c audio/sine_gen.c \
+                                  $(ARM_BUILD_DIR)/arb_plugin.o $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c plugins/example_sine/sine.c -o $(ARM_BUILD_DIR)/sine.o
+	$(ARM_CC) $(PLUGIN_CFLAGS) -ffunction-sections -fdata-sections -Iinclude -c audio/sine_gen.c -o $(ARM_BUILD_DIR)/sine_gen_pl.o
+	$(ARM_LD) -T $(PLUGIN_LD) --gc-sections -o $@ $(ARM_BUILD_DIR)/sine.o \
+	    $(ARM_BUILD_DIR)/sine_gen_pl.o $(ARM_BUILD_DIR)/arb_plugin.o
+
+$(ARM_BUILD_DIR)/plugin_sine_crash.elf: plugins/example_sine/sine.c audio/sine_gen.c \
+                                        $(ARM_BUILD_DIR)/arb_plugin.o $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -DCRASH -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c plugins/example_sine/sine.c -o $(ARM_BUILD_DIR)/sine_crash.o
+	$(ARM_CC) $(PLUGIN_CFLAGS) -ffunction-sections -fdata-sections -Iinclude -c audio/sine_gen.c -o $(ARM_BUILD_DIR)/sine_gen_pl.o
+	$(ARM_LD) -T $(PLUGIN_LD) --gc-sections -o $@ $(ARM_BUILD_DIR)/sine_crash.o \
+	    $(ARM_BUILD_DIR)/sine_gen_pl.o $(ARM_BUILD_DIR)/arb_plugin.o
+
+# Full-stack host-resilience test on QEMU 'virt' (MMU on): a sine plugin
+# produces sound the host plays; a crashing plugin is killed and the host keeps
+# running on silence (the M5 "done when").
+VIRT_HOST_ELF  = $(ARM_BUILD_DIR)/virt_host.elf
+VIRT_HOST_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                 $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                 $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                 $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                 $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/plugin_host.c \
+                 $(ARCH_ARM_DIR)/string.c
+
+test-arm-plugin-host-qemu: $(ARM_BUILD_DIR)/plugin_sine.elf $(ARM_BUILD_DIR)/plugin_sine_crash.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/ph_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/ph_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/ph_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/ph_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/host_blob.S           -o $(ARM_BUILD_DIR)/ph_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/ph_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/plugin_host_main.c -o $(ARM_BUILD_DIR)/ph_main.o
+	for s in $(VIRT_HOST_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/ph_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_HOST_ELF) \
+	    $(ARM_BUILD_DIR)/ph_start.o $(ARM_BUILD_DIR)/ph_main.o \
+	    $(ARM_BUILD_DIR)/ph_uart.o $(ARM_BUILD_DIR)/ph_vectors.o \
+	    $(ARM_BUILD_DIR)/ph_entry.o $(ARM_BUILD_DIR)/ph_tramp.o \
+	    $(ARM_BUILD_DIR)/ph_blob.o \
+	    $(ARM_BUILD_DIR)/ph_pmm.o $(ARM_BUILD_DIR)/ph_mmu.o \
+	    $(ARM_BUILD_DIR)/ph_vmem.o $(ARM_BUILD_DIR)/ph_process.o \
+	    $(ARM_BUILD_DIR)/ph_exceptions.o $(ARM_BUILD_DIR)/ph_syscalls.o \
+	    $(ARM_BUILD_DIR)/ph_elf64.o $(ARM_BUILD_DIR)/ph_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/ph_audio_ringbuf.o $(ARM_BUILD_DIR)/ph_plugin_host.o \
+	    $(ARM_BUILD_DIR)/ph_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_host.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_host.log -net none \
+	    -kernel $(VIRT_HOST_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_host.log
+	@grep -q "PLUGIN-HOST: PASS" $(ARM_BUILD_DIR)/virt_host.log \
+	  && echo "QEMU virt resilient-host test PASSED" \
+	  || { echo "QEMU virt resilient-host test FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can

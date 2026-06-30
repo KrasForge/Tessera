@@ -238,6 +238,25 @@ jobs:
       - name: Shared ring between host and plugin on QEMU virt (zero syscalls/block)
         run: make test-arm-ring-share-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  plugin-host-tests:
+    name: M5 plugin host - resilience host test + QEMU virt crash survival
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Resilient host host unit tests (death detection, ASan + UBSan)
+        run: make test-arm-plugin-host
+
+      - name: Sine plugin produces sound + host survives a crash on QEMU virt
+        run: make test-arm-plugin-host-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
