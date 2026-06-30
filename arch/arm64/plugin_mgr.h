@@ -7,9 +7,11 @@
  * parameter queue) along with its page tables and ASID, so loading and
  * unloading repeatedly returns the physical allocator to its baseline.
  *
- * Plugins are looked up by name from an in-memory blob registry (the stand-in
- * for storage / a ramdisk).  Graph wiring is delegated to the control plane
- * from issue #28.
+ * Plugins are resolved by path through a tiny VFS (issue #34): "/sd/<name>"
+ * comes off the FAT16 SD volume, "/rd/<name>" or a bare "<name>" comes from
+ * the in-memory ramdisk.  Each image is validated (AArch64 ELF, no disallowed
+ * imports, matching ABI major version via an EL0 handshake) before plugin_init
+ * runs.  Graph wiring is delegated to the control plane from issue #28.
  */
 
 #ifndef ARM64_PLUGIN_MGR_H
@@ -18,6 +20,7 @@
 #include "plugin_loader.h"
 #include "param_queue.h"
 #include "graph_control.h"
+#include "vfs.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -37,29 +40,28 @@ typedef struct {
 } pm_slot_t;
 
 typedef struct {
-    const char *name;
-    void       *blob;
-    size_t      len;
-} pm_blob_t;
-
-typedef struct {
     pm_slot_t       slots[PM_MAX_PLUGINS];
-    pm_blob_t       blobs[PM_MAX_PLUGINS];
-    int             n_blobs;
-    graph_control_t *gc;   /* optional: graph wiring (issue #28) */
+    vfs_t           vfs;   /* plugin sources: ramdisk + SD (issue #34) */
+    graph_control_t *gc;   /* optional: graph wiring (issue #28)        */
 } plugin_mgr_t;
 
 /* Errors (negative). */
 #define PM_OK        0
-#define PM_ENOENT  (-1)   /* no such blob / pid          */
+#define PM_ENOENT  (-1)   /* no such file / pid          */
 #define PM_ENOMEM  (-2)   /* out of slots / memory       */
-#define PM_EBADELF (-3)   /* plugin failed to load       */
+#define PM_EBADELF (-3)   /* not a valid AArch64 ELF     */
 #define PM_EFULL   (-4)   /* parameter queue full        */
+#define PM_EABI    (-5)   /* wrong plugin ABI version    */
+#define PM_EIMPORT (-6)   /* disallowed import symbol(s) */
 
 void pm_init(plugin_mgr_t *m, graph_control_t *gc);
 
-/* Register a plugin image under `name` (the "storage"). */
+/* Register a ramdisk plugin image under `name` (loadable as "<name>" or
+ * "/rd/<name>"). */
 int pm_register_blob(plugin_mgr_t *m, const char *name, void *blob, size_t len);
+
+/* Mount the SD-card FAT volume (plugins loadable as "/sd/<name>"). */
+void pm_mount_sd(plugin_mgr_t *m, fat_fs_t *fat);
 
 /* sys_plugin_load: load `path` into a new isolated process with its own
  * parameter queue.  Returns the new PID (> 0) or a negative PM_E*. */

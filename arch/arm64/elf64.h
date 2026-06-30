@@ -101,4 +101,11 @@ int elf64_symval(const void *img, size_t len, const char *name, uint64_t *value)
  * A self-contained plugin has zero. */
 int elf64_undefined_count(const void *img, size_t len);
 
+/* Count undefined (imported) named symbols that are NOT in the `allowed` list
+ * of `n_allowed` names.  Zero means every import is permitted (a self-contained
+ * plugin with no imports, or one importing only allowed symbols).  Used to
+ * reject plugins that pull in libc or kernel symbols (issue #34). */
+int elf64_disallowed_imports(const void *img, size_t len,
+                             const char *const *allowed, int n_allowed);
+
 #endif /* ARM64_ELF64_H */

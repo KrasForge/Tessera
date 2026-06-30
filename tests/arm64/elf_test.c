@@ -103,6 +103,16 @@ int main(void)
           "UNDEF import is not resolved as a definition");
     CHECK(elf64_undefined_count(g_img, g_len) == 1, "one unresolved import counted");
 
+    /* ---- import allow-list (issue #34) ---- */
+    CHECK(elf64_disallowed_imports(g_img, g_len, (const char *const *)0, 0) == 1,
+          "with no allow-list, the lone import is disallowed");
+    const char *allow_one[] = { "ext_import" };
+    CHECK(elf64_disallowed_imports(g_img, g_len, allow_one, 1) == 0,
+          "allow-listing that import permits it");
+    const char *allow_other[] = { "something_else" };
+    CHECK(elf64_disallowed_imports(g_img, g_len, allow_other, 1) == 1,
+          "allow-listing a different name still rejects the import");
+
     /* ---- rejection of malformed images ---- */
     CHECK(elf64_validate(g_img, 8) < 0, "truncated header rejected");
     uint8_t bad = g_img[0]; g_img[0] = 0;
