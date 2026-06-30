@@ -1632,6 +1632,40 @@ test-arm-graph-ctl-qemu: $(ARM_BUILD_DIR)/plugin_controller.elf
 	  && echo "QEMU virt graph-control test PASSED" \
 	  || { echo "QEMU virt graph-control test FAILED"; exit 1; }
 
+# ---- M7: live parameter changes (issue #33) -------------------------------
+# Integration host test: CC -> param map -> lock-free queue -> filter, checking
+# click-free modulation, overflow handling, and latency.  Uses libm for the
+# test sine only (the filter and queue use none).
+ARM_PARAMLIVE_TEST_SRCS = tests/arm64/param_live_test.c $(ARCH_ARM_DIR)/param_queue.c \
+                          plugins/effect_filter/main.c
+test-arm-param-live: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Iinclude -I$(ARCH_ARM_DIR) \
+	      $(ARM_PARAMLIVE_TEST_SRCS) -o $(ARM_BUILD_DIR)/param_live_test -lm
+	$(ARM_BUILD_DIR)/param_live_test
+
+# Live parameter modulation on QEMU 'virt': CC -> map -> queue -> filter, while
+# a tone plays; checks click-free sweep + cutoff change on-target (FP enabled).
+VIRT_PARAMLIVE_ELF = $(ARM_BUILD_DIR)/virt_paramlive.elf
+test-arm-param-live-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/pl_start.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/pl_uart.o
+	$(ARM_CC) $(HARNESS_FP_CFLAGS) -c $(VIRT_DIR)/param_live_main.c -o $(ARM_BUILD_DIR)/pl_main.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(ARCH_ARM_DIR)/param_queue.c -o $(ARM_BUILD_DIR)/pl_pq.o
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c plugins/effect_filter/main.c -o $(ARM_BUILD_DIR)/pl_filter.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_PARAMLIVE_ELF) \
+	    $(ARM_BUILD_DIR)/pl_start.o $(ARM_BUILD_DIR)/pl_main.o \
+	    $(ARM_BUILD_DIR)/pl_uart.o $(ARM_BUILD_DIR)/pl_pq.o \
+	    $(ARM_BUILD_DIR)/pl_filter.o
+	rm -f $(ARM_BUILD_DIR)/virt_paramlive.log
+	-timeout 15 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_paramlive.log -net none \
+	    -kernel $(VIRT_PARAMLIVE_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_paramlive.log
+	@grep -q "PARAM-LIVE: PASS" $(ARM_BUILD_DIR)/virt_paramlive.log \
+	  && echo "QEMU virt live-parameter test PASSED" \
+	  || { echo "QEMU virt live-parameter test FAILED"; exit 1; }
+
 # ---- M7: MIDI input (issue #31) -------------------------------------------
 # Host unit tests for the MIDI parser and event ring.
 ARM_MIDI_TEST_SRCS = tests/arm64/midi_test.c $(ARCH_ARM_DIR)/midi.c
