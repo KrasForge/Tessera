@@ -1267,6 +1267,16 @@ test-arm-plugin-host: | $(ARM_BUILD_DIR)
 	      $(ARM_HOST_TEST_SRCS) -o $(ARM_HOST_TEST_BIN)
 	$(ARM_HOST_TEST_BIN)
 
+# Host unit tests for the audio graph model (issue #27).
+ARM_GRAPH_TEST_SRCS = tests/arm64/graph_test.c $(ARCH_ARM_DIR)/audio_graph.c
+ARM_GRAPH_TEST_BIN  = $(ARM_BUILD_DIR)/graph_test
+
+test-arm-graph: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) \
+	      $(ARM_GRAPH_TEST_SRCS) -o $(ARM_GRAPH_TEST_BIN)
+	$(ARM_GRAPH_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -1478,6 +1488,55 @@ test-arm-plugin-host-qemu: $(ARM_BUILD_DIR)/plugin_sine.elf $(ARM_BUILD_DIR)/plu
 	@grep -q "PLUGIN-HOST: PASS" $(ARM_BUILD_DIR)/virt_host.log \
 	  && echo "QEMU virt resilient-host test PASSED" \
 	  || { echo "QEMU virt resilient-host test FAILED"; exit 1; }
+
+# ---- M6: audio graph (issue #27) ------------------------------------------
+$(ARM_BUILD_DIR)/plugin_effect.elf: plugins/example_effect/effect.c \
+                                    $(ARM_BUILD_DIR)/arb_plugin.o $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/effect.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/effect.o $(ARM_BUILD_DIR)/arb_plugin.o
+
+# Audio-graph processing test on QEMU 'virt' (MMU on): drive isolated synth and
+# effect plugins through ring-buffer edges in the graph's topological order;
+# 2-node and 3-node chains produce sound, the wrong order produces silence.
+VIRT_GRAPH_ELF  = $(ARM_BUILD_DIR)/virt_graph.elf
+VIRT_GRAPH_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                  $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                  $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                  $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                  $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+                  $(ARCH_ARM_DIR)/string.c
+
+test-arm-graph-qemu: $(ARM_BUILD_DIR)/plugin_sine.elf $(ARM_BUILD_DIR)/plugin_effect.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/gr_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/gr_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/gr_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/gr_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/graph_blob.S          -o $(ARM_BUILD_DIR)/gr_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/gr_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/graph_main.c -o $(ARM_BUILD_DIR)/gr_main.o
+	for s in $(VIRT_GRAPH_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/gr_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_GRAPH_ELF) \
+	    $(ARM_BUILD_DIR)/gr_start.o $(ARM_BUILD_DIR)/gr_main.o \
+	    $(ARM_BUILD_DIR)/gr_uart.o $(ARM_BUILD_DIR)/gr_vectors.o \
+	    $(ARM_BUILD_DIR)/gr_entry.o $(ARM_BUILD_DIR)/gr_tramp.o \
+	    $(ARM_BUILD_DIR)/gr_blob.o \
+	    $(ARM_BUILD_DIR)/gr_pmm.o $(ARM_BUILD_DIR)/gr_mmu.o \
+	    $(ARM_BUILD_DIR)/gr_vmem.o $(ARM_BUILD_DIR)/gr_process.o \
+	    $(ARM_BUILD_DIR)/gr_exceptions.o $(ARM_BUILD_DIR)/gr_syscalls.o \
+	    $(ARM_BUILD_DIR)/gr_elf64.o $(ARM_BUILD_DIR)/gr_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/gr_audio_ringbuf.o $(ARM_BUILD_DIR)/gr_audio_graph.o \
+	    $(ARM_BUILD_DIR)/gr_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_graph.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_graph.log -net none \
+	    -kernel $(VIRT_GRAPH_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_graph.log
+	@grep -q "AUDIO-GRAPH: PASS" $(ARM_BUILD_DIR)/virt_graph.log \
+	  && echo "QEMU virt audio-graph test PASSED" \
+	  || { echo "QEMU virt audio-graph test FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
