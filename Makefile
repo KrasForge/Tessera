@@ -809,6 +809,7 @@ endif
 
 ARM_CFLAGS  = $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding \
               -mgeneral-regs-only -fno-stack-protector -fno-pic -fno-pie \
+              -fno-builtin \
               -Wall -Wextra -std=c11 -O2 -g -Iinclude/ -I$(ARCH_ARM_DIR)
 ARM_ASFLAGS = $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding -g -Iinclude/
 ARM_LDSCRIPT = $(ARCH_ARM_DIR)/kernel.ld
@@ -862,6 +863,21 @@ $(ARM_KERNEL_ELF): $(ARM_OBJECTS) $(ARM_LDSCRIPT)
 $(ARM_KERNEL_IMG): $(ARM_KERNEL_ELF)
 	$(ARM_OBJCOPY) -O binary $< $@
 
+# Host unit tests for the M1 memory subsystem (issues #7, #8/#9, #10).
+# Compiles the real arch/arm64 allocator + page-table sources with
+# -DHOSTTEST and runs them under AddressSanitizer on the build host — no
+# QEMU or cross-toolchain required, so this is the portable CI gate.
+ARM_M1_TEST_SRCS = tests/arm64/m1_host_test.c \
+                   $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                   $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/kheap.c
+ARM_M1_TEST_BIN  = $(ARM_BUILD_DIR)/m1_host_test
+
+test-arm-m1: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_M1_TEST_SRCS) -o $(ARM_M1_TEST_BIN)
+	$(ARM_M1_TEST_BIN)
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 
@@ -882,4 +898,4 @@ arm-install-cross:
 	sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
 		qemu-system-arm
 
-.PHONY: arm arm-clean qemu-arm arm-install-deps arm-install-cross
+.PHONY: arm arm-clean qemu-arm test-arm-m1 arm-install-deps arm-install-cross
