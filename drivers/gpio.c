@@ -58,6 +58,17 @@ void gpio_clear(uint32_t pin)
         GPCLR1 = 1u << (pin - 32u);
 }
 
+/* Pin-level registers: GPLEV0 for pins 0-31, GPLEV1 for pins 32-53. */
+#define GPLEV0      (*(volatile uint32_t *)(GPIO_BASE + 0x34u))
+#define GPLEV1      (*(volatile uint32_t *)(GPIO_BASE + 0x38u))
+
+int gpio_get(uint32_t pin)
+{
+    if (pin < 32u)
+        return (int)((GPLEV0 >> pin) & 1u);
+    return (int)((GPLEV1 >> (pin - 32u)) & 1u);
+}
+
 void gpio_init(void)
 {
     /* Clear all pull-up/pull-down resistors on BCM2711 (54 GPIO pins

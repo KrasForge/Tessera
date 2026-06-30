@@ -29,4 +29,8 @@ void gpio_set(uint32_t pin);
 /* Drive a GPIO pin low. */
 void gpio_clear(uint32_t pin);
 
+/* Read the level of a GPIO pin (1 = high, 0 = low).  Used for the CV/Gate
+ * input's gate pin (issue #32). */
+int gpio_get(uint32_t pin);
+
 #endif /* GPIO_H */

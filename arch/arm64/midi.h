@@ -24,11 +24,20 @@ typedef enum {
     MIDI_CC,
 } midi_type_t;
 
+/* Where an input event came from, so MIDI and CV/Gate (issue #32) can share one
+ * event ring while staying distinguishable. */
+typedef enum {
+    INPUT_SRC_MIDI = 0,
+    INPUT_SRC_CV   = 1,
+} input_source_t;
+
 typedef struct {
     uint8_t type;       /* midi_type_t                              */
     uint8_t channel;    /* 0..15                                    */
     uint8_t data1;      /* note number / CC number                  */
     uint8_t data2;      /* velocity / CC value                      */
+    uint8_t source;     /* input_source_t (added last so positional */
+                        /* initialisers keep working)               */
 } midi_event_t;
 
 /* ---- byte-stream parser ---- */

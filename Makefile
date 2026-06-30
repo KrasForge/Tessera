@@ -1640,6 +1640,37 @@ test-arm-midi: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_MIDI_TEST_SRCS) -o $(ARM_BUILD_DIR)/midi_test
 	$(ARM_BUILD_DIR)/midi_test
 
+# ---- M7: CV/Gate input (issue #32) ----------------------------------------
+# Host unit tests for the MCP3208 decode, 1V/oct scaling, gate edges, and
+# MIDI/CV coexistence on one ring.
+ARM_CVGATE_TEST_SRCS = tests/arm64/cvgate_test.c $(ARCH_ARM_DIR)/cvgate.c $(ARCH_ARM_DIR)/midi.c
+test-arm-cvgate: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_CVGATE_TEST_SRCS) -o $(ARM_BUILD_DIR)/cvgate_test
+	$(ARM_BUILD_DIR)/cvgate_test
+
+# CV/Gate listener on QEMU 'virt': simulated gate edges + pitch CV interleaved
+# with MIDI, decoded onto one event ring and logged over the UART.
+VIRT_CVGATE_ELF = $(ARM_BUILD_DIR)/virt_cvgate.elf
+test-arm-cvgate-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/cg_start.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/cg_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) -c $(VIRT_DIR)/cvgate_main.c -o $(ARM_BUILD_DIR)/cg_main.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(ARCH_ARM_DIR)/cvgate.c -o $(ARM_BUILD_DIR)/cg_cvgate.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(ARCH_ARM_DIR)/midi.c   -o $(ARM_BUILD_DIR)/cg_midi.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_CVGATE_ELF) \
+	    $(ARM_BUILD_DIR)/cg_start.o $(ARM_BUILD_DIR)/cg_main.o \
+	    $(ARM_BUILD_DIR)/cg_uart.o $(ARM_BUILD_DIR)/cg_cvgate.o \
+	    $(ARM_BUILD_DIR)/cg_midi.o
+	rm -f $(ARM_BUILD_DIR)/virt_cvgate.log
+	-timeout 15 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_cvgate.log -net none \
+	    -kernel $(VIRT_CVGATE_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_cvgate.log
+	@grep -q "CVGATE: PASS" $(ARM_BUILD_DIR)/virt_cvgate.log \
+	  && echo "QEMU virt CV/Gate listener test PASSED" \
+	  || { echo "QEMU virt CV/Gate listener test FAILED"; exit 1; }
+
 # MIDI listener on QEMU 'virt': feed a byte stream through the parser into the
 # event ring and log the decoded events over the UART.
 VIRT_MIDI_ELF = $(ARM_BUILD_DIR)/virt_midi.elf

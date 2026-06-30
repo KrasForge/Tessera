@@ -339,6 +339,12 @@ jobs:
       - name: MIDI listener on QEMU virt (parser -> ring -> UART log)
         run: make test-arm-midi-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: CV/Gate host unit tests (MCP3208 decode, 1V/oct, coexistence)
+        run: make test-arm-cvgate
+
+      - name: CV/Gate listener on QEMU virt (CV + MIDI on one ring)
+        run: make test-arm-cvgate-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
