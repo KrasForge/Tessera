@@ -76,4 +76,7 @@ long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0);
 /* The process currently executing at EL0 (NULL if in the kernel). */
 process_t *current_process(void);
 
+/* Set the current process (used by the scheduler on each switch). */
+void process_set_current(process_t *p);
+
 #endif /* ARM64_PROCESS_H */

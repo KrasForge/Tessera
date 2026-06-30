@@ -15,6 +15,7 @@
 #include "kheap.h"
 #include "process.h"
 #include "usermode.h"
+#include "sched.h"
 #include "uart_pl011.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -23,7 +24,10 @@
 extern char user_payload[], user_payload_end[];
 extern char user_priv_payload[], user_priv_payload_end[];
 extern char user_badwrite_payload[], user_badwrite_payload_end[];
+extern char user_task[], user_task_end[];
+extern char user_fpu_task[], user_fpu_task_end[];
 void *memcpy(void *, const void *, size_t);
+void  fpu_disable(void);
 
 /* A virtual window well above the identity-mapped RAM/MMIO (4 GiB), so the
  * VMM creates fresh L0-L3 tables rather than touching the 2 MiB identity
@@ -238,4 +242,50 @@ void m2_fault_selftest(void)
                 OKBAD(cb == 0), (int)cb);
 
     uart_puts("=== M2 fault-containment complete ===\r\n\r\n");
+}
+
+/* M2 (issue #15): cooperative context switch between isolated processes. */
+#define SCHED_DATA_VA (USER_VA_BASE + 0x20000)
+
+static process_t *sched_make(const char *name, char *code, size_t len, char data)
+{
+    process_t *p = load_user(name, code, len);     /* code RX + stack RW */
+    if (data) {
+        uintptr_t data_pa = phys_alloc_page();
+        *(volatile char *)data_pa = data;
+        process_map(p, data_pa, SCHED_DATA_VA, PAGE_SIZE, VMM_READ | VMM_WRITE);
+    }
+    return p;
+}
+
+void m2_sched_selftest(void)
+{
+    uart_puts("=== M2 context-switch self-test (issue #15) ===\r\n");
+
+    fpu_disable();
+    sched_init();
+
+    process_t *a = sched_make("task-A",   user_task, (size_t)(user_task_end - user_task), 'A');
+    process_t *b = sched_make("task-B",   user_task, (size_t)(user_task_end - user_task), 'B');
+    process_t *f = sched_make("task-FPU", user_fpu_task, (size_t)(user_fpu_task_end - user_fpu_task), 0);
+
+    sched_add(a, USER_ENTRY, USER_SP, SCHED_DATA_VA);
+    sched_add(b, USER_ENTRY, USER_SP, SCHED_DATA_VA);
+    sched_add(f, USER_ENTRY, USER_SP, 0);
+
+    uart_puts("sched : round-robin output ......... ");
+    sched_run();
+    uart_puts("\r\n");
+
+    uart_printf("sched : task-A read own page ....... %s\r\n", OKBAD(a->exit_code == 'A'));
+    uart_printf("sched : task-B read own page ....... %s\r\n", OKBAD(b->exit_code == 'B'));
+    uart_printf("sched : isolation (no TLB alias) ... %s\r\n",
+                OKBAD(a->exit_code == 'A' && b->exit_code == 'B'));
+    uart_printf("sched : lazy FPU result correct .... %s\r\n", OKBAD(f->exit_code == 0));
+
+    process_destroy(a);
+    process_destroy(b);
+    process_destroy(f);
+
+    uart_puts("=== M2 context-switch complete ===\r\n\r\n");
 }

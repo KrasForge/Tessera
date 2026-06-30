@@ -17,6 +17,7 @@ struct trapframe;
 /* Minimal syscall numbers for the M2 smoke test. */
 #define SYS_WRITE  1   /* (fd, buf, len) -> bytes written; writes to UART */
 #define SYS_EXIT   2   /* (code) -> does not return; unwinds to run_user  */
+#define SYS_YIELD  3   /* () -> cooperatively switch to the next task     */
 
 /* Drop to EL0 and run a process until it exits (or faults).
  *

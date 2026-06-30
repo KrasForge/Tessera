@@ -29,6 +29,7 @@ struct trapframe {
 #define EC_INSTR_ABORT_S 0x21   /* instruction abort, same EL  (EL1)   */
 #define EC_DATA_ABORT_L  0x24   /* data abort, lower EL (EL0)          */
 #define EC_DATA_ABORT_S  0x25   /* data abort, same EL  (EL1)          */
+#define EC_FP_ACCESS     0x07   /* Advanced SIMD / FP access trap      */
 
 /* Coarse classification of an exception class. */
 typedef enum {

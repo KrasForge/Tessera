@@ -997,6 +997,44 @@ test-arm-fault-qemu: | $(ARM_BUILD_DIR)
 	  && echo "QEMU virt fault-containment test PASSED" \
 	  || { echo "QEMU virt fault-containment test FAILED"; exit 1; }
 
+# Full-stack context-switch test on QEMU 'virt' (issue #15): round-robin EL0
+# tasks with per-process isolation and lazy FPU, MMU enabled.
+VIRT_SCHED_ELF  = $(ARM_BUILD_DIR)/virt_sched.elf
+VIRT_SCHED_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                  $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                  $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                  $(ARCH_ARM_DIR)/sched.c $(ARCH_ARM_DIR)/string.c
+
+test-arm-sched-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/s_start.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c  -o $(ARM_BUILD_DIR)/s_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/sched_main.c -o $(ARM_BUILD_DIR)/s_main.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S        -o $(ARM_BUILD_DIR)/s_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S          -o $(ARM_BUILD_DIR)/s_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/context_switch.S -o $(ARM_BUILD_DIR)/s_ctx.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/user_demo.S      -o $(ARM_BUILD_DIR)/s_userdemo.o
+	for s in $(VIRT_SCHED_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/s_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_SCHED_ELF) \
+	    $(ARM_BUILD_DIR)/s_start.o $(ARM_BUILD_DIR)/s_main.o \
+	    $(ARM_BUILD_DIR)/s_uart.o $(ARM_BUILD_DIR)/s_vectors.o \
+	    $(ARM_BUILD_DIR)/s_entry.o $(ARM_BUILD_DIR)/s_ctx.o \
+	    $(ARM_BUILD_DIR)/s_userdemo.o \
+	    $(ARM_BUILD_DIR)/s_pmm.o $(ARM_BUILD_DIR)/s_mmu.o \
+	    $(ARM_BUILD_DIR)/s_vmem.o $(ARM_BUILD_DIR)/s_process.o \
+	    $(ARM_BUILD_DIR)/s_exceptions.o $(ARM_BUILD_DIR)/s_syscalls.o \
+	    $(ARM_BUILD_DIR)/s_sched.o $(ARM_BUILD_DIR)/s_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_sched.log
+	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_sched.log -net none \
+	    -kernel $(VIRT_SCHED_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_sched.log
+	@grep -q "VIRT-SCHED: PASS" $(ARM_BUILD_DIR)/virt_sched.log \
+	  && echo "QEMU virt context-switch test PASSED" \
+	  || { echo "QEMU virt context-switch test FAILED"; exit 1; }
+
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
 

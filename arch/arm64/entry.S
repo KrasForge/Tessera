@@ -64,5 +64,6 @@ kernel_resume:
 
     .section .bss
     .align  4
+    .global g_kresume
 g_kresume:
     .skip   112                 /* x19..x30 (12) + sp (1), padded to 16 */

@@ -59,6 +59,8 @@ extern char vectors[];
 
 /* Provided strongly by arch/arm64/syscalls.c (weak default below). */
 void arm64_user_fault(struct trapframe *tf);
+/* Provided strongly by arch/arm64/sched.c (weak default below). */
+void arm64_fpu_trap(struct trapframe *tf);
 
 /* Recoverable-trap hook used by exceptions_selftest(). */
 static volatile int      g_expect_trap;
@@ -122,6 +124,13 @@ void arm64_exception(struct trapframe *tf, unsigned long kind)
     if (type == 2) { uart_puts("\r\n[exception] unexpected FIQ\r\n");    dump(tf, ec, kind); halt(); }
     if (type == 3) { uart_puts("\r\n[exception] SError\r\n");           dump(tf, ec, kind); halt(); }
 
+    /* Advanced SIMD / FP access trap (lazy FPU, issue #15): enable FP for the
+     * current task, lazily save/restore NEON state, and resume. */
+    if (ec == EC_FP_ACCESS) {
+        arm64_fpu_trap(tf);
+        return;
+    }
+
     int from_el0 = (kind >= 8);
 
     switch (arm64_ec_class(ec)) {
@@ -135,7 +144,9 @@ void arm64_exception(struct trapframe *tf, unsigned long kind)
         dump(tf, ec, kind);
         if (from_el0) {
             uart_puts("  -> terminating EL0 process\r\n");
-            arm64_user_fault(tf);   /* strong version does not return */
+            arm64_user_fault(tf);   /* kills the process; in scheduler mode it
+                                     * switches to the next task and returns */
+            return;
         }
         halt();
         return;
@@ -146,7 +157,8 @@ void arm64_exception(struct trapframe *tf, unsigned long kind)
         dump(tf, ec, kind);
         if (from_el0) {
             uart_puts("  -> terminating EL0 process\r\n");
-            arm64_user_fault(tf);   /* strong version does not return */
+            arm64_user_fault(tf);
+            return;
         }
         halt();
         return;
@@ -166,6 +178,14 @@ __attribute__((weak)) void arm64_handle_svc(struct trapframe *tf)
  * terminates the faulting process via kernel_resume().  The weak version
  * returns, so the caller falls through to halt(). */
 __attribute__((weak)) void arm64_user_fault(struct trapframe *tf)
+{
+    (void)tf;
+}
+
+/* Weak default FP-access-trap hook; issue #15 provides a strong version that
+ * enables FP and lazily saves/restores NEON state.  The weak version does
+ * nothing (no FP is used in the minimal harnesses). */
+__attribute__((weak)) void arm64_fpu_trap(struct trapframe *tf)
 {
     (void)tf;
 }

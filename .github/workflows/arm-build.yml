@@ -101,3 +101,6 @@ jobs:
 
       - name: Boot fault-containment harness on QEMU virt (MMU enforced)
         run: make test-arm-fault-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: Boot context-switch harness on QEMU virt (round-robin + FPU)
+        run: make test-arm-sched-qemu CROSS_COMPILE=aarch64-linux-gnu-

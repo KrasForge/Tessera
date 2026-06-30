@@ -27,6 +27,7 @@ void m1_selftest(void);
 void m2_process_selftest(void);
 void m2_user_selftest(void);
 void m2_fault_selftest(void);
+void m2_sched_selftest(void);
 
 /* CM4 / Pi 4 on-board LED.  GPIO 42, active-high (BCM2711 datasheet §5). */
 #define CM4_LED_PIN 42u
@@ -83,6 +84,7 @@ void kmain(void)
     m2_process_selftest();
     m2_user_selftest();
     m2_fault_selftest();
+    m2_sched_selftest();
 
     /* 1 Hz LED heartbeat: 500 ms on, 500 ms off. */
     while (1) {

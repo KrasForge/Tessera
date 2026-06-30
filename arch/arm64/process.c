@@ -141,6 +141,11 @@ process_t *current_process(void)
     return g_current;
 }
 
+void process_set_current(process_t *p)
+{
+    g_current = p;
+}
+
 #ifndef HOSTTEST   /* process_run drops to EL0 (entry.S) and touches TTBR0 */
 long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
 {
