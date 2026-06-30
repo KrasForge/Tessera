@@ -10,9 +10,11 @@
 #ifndef TESSERA_RING_CONTRACT_H
 #define TESSERA_RING_CONTRACT_H
 
-/* User-space VA of the shared ring, above the plugin's segments/stack/
- * trampoline/param pages (see plugin_loader.h). */
+/* User-space VAs of the shared rings, above the plugin's segments/stack/
+ * trampoline/param pages (see plugin_loader.h).  RING_VA is a node's OUTPUT
+ * ring; RING_IN_VA is its INPUT ring (used by effect-style nodes, issue #27). */
 #define RING_VA      (0x8000000000ull + 0x0B000000ull)
+#define RING_IN_VA   (0x8000000000ull + 0x0C000000ull)
 
 #define RING_SR      48000u    /* sample rate                 */
 #define RING_BLOCK   256u      /* frames per process block    */
