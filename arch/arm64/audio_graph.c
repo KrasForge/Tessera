@@ -128,6 +128,23 @@ void *audio_graph_disconnect(audio_graph_t *g, int src, int dst)
     return ring;
 }
 
+void audio_graph_remove_node(audio_graph_t *g, int n)
+{
+    if (n < 0 || n >= GRAPH_MAX_NODES || g->nodes[n].type == NODE_UNUSED)
+        return;
+    for (int e = 0; e < GRAPH_MAX_EDGES; e++)
+        if (g->edges[e].used && (g->edges[e].src == n || g->edges[e].dst == n)) {
+            g->edges[e].used = 0;
+            g->edges[e].ring = (void *)0;
+            g->n_edges--;
+        }
+    if (g->dac_node == n)
+        g->dac_node = -1;
+    g->nodes[n].type = NODE_UNUSED;
+    g->nodes[n].pid  = 0;
+    g->n_nodes--;
+}
+
 /* Kahn's algorithm.  Produces a topological order; afterward the DAC node is
  * forced to the very end (it is a sink, so nothing depends on it and moving it
  * last never violates the ordering). */

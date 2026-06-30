@@ -36,6 +36,10 @@ __attribute__((weak)) void syscall_trace(uint64_t num) { (void)num; }
 __attribute__((weak)) long sys_graph_connect(uint32_t s, uint32_t d)    { (void)s; (void)d; return -1; }
 __attribute__((weak)) long sys_graph_disconnect(uint32_t s, uint32_t d) { (void)s; (void)d; return -1; }
 __attribute__((weak)) long sys_graph_list(void)                         { return -1; }
+__attribute__((weak)) long sys_plugin_load(const char *p)               { (void)p; return -1; }
+__attribute__((weak)) long sys_plugin_unload(uint32_t pid)              { (void)pid; return -1; }
+__attribute__((weak)) long sys_plugin_set_param(uint32_t pid, uint32_t id, uint32_t b)
+                                                                        { (void)pid; (void)id; (void)b; return -1; }
 
 void arm64_handle_svc(struct trapframe *tf)
 {
@@ -73,6 +77,18 @@ void arm64_handle_svc(struct trapframe *tf)
         break;
     case SYS_GRAPH_LIST:
         tf->x[0] = (uint64_t)sys_graph_list();
+        break;
+
+    case SYS_PLUGIN_LOAD:
+        tf->x[0] = (uint64_t)sys_plugin_load((const char *)(uintptr_t)tf->x[0]);
+        break;
+    case SYS_PLUGIN_UNLOAD:
+        tf->x[0] = (uint64_t)sys_plugin_unload((uint32_t)tf->x[0]);
+        break;
+    case SYS_PLUGIN_SET_PARAM:
+        tf->x[0] = (uint64_t)sys_plugin_set_param((uint32_t)tf->x[0],
+                                                  (uint32_t)tf->x[1],
+                                                  (uint32_t)tf->x[2]);
         break;
 
     default:

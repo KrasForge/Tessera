@@ -301,6 +301,25 @@ jobs:
       - name: Runtime graph rewire via syscalls from EL0 on QEMU virt
         run: make test-arm-graph-ctl-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  control-syscall-tests:
+    name: M7 control syscalls - param-queue host test + QEMU virt load/unload
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Lock-free parameter-queue host unit tests (ASan + UBSan)
+        run: make test-arm-param-queue
+
+      - name: Control syscalls on QEMU virt (leak-free load/unload, set-param, EL0)
+        run: make test-arm-control-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   exception-tests:
     name: Exception handling — host decode + QEMU virt boot
     runs-on: ubuntu-22.04
