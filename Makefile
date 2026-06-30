@@ -1549,6 +1549,41 @@ test-arm-graph-qemu: $(ARM_BUILD_DIR)/plugin_sine.elf $(ARM_BUILD_DIR)/plugin_ef
 	  && echo "QEMU virt audio-graph test PASSED" \
 	  || { echo "QEMU virt audio-graph test FAILED"; exit 1; }
 
+# ---- M6: reference low-pass filter plugin (issue #29) ---------------------
+# Host unit test for the filter DSP (uses libm only to synthesise test signals;
+# the plugin itself uses none).
+ARM_FILTER_TEST_SRCS = tests/arm64/filter_test.c plugins/effect_filter/main.c
+ARM_FILTER_TEST_BIN  = $(ARM_BUILD_DIR)/filter_test
+
+test-arm-filter: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Iinclude $(ARM_FILTER_TEST_SRCS) -o $(ARM_FILTER_TEST_BIN) -lm
+	$(ARM_FILTER_TEST_BIN)
+
+# Standalone AArch64 ELF for the filter plugin (and the other example plugins).
+$(ARM_BUILD_DIR)/plugin_effect_filter.elf: plugins/effect_filter/main.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/effect_filter.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/effect_filter.o
+
+# `make plugins`: build every example plugin as a standalone AArch64 ELF and
+# confirm the filter plugin has no kernel imports.
+.PHONY: plugins
+plugins: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plugin_sine.elf \
+         $(ARM_BUILD_DIR)/plugin_effect.elf $(ARM_BUILD_DIR)/plugin_producer.elf \
+         $(ARM_BUILD_DIR)/plugin_controller.elf \
+         $(ARM_BUILD_DIR)/plugin_effect_filter.elf
+	@echo "--- plugin ELFs built ---"
+	@ls -1 $(ARM_BUILD_DIR)/plugin_*.elf
+	@echo "--- effect_filter import check ---"
+	@# Count UNDEFINED symbols that have a name (the index-0 null symbol is UND
+	@# with an empty name and is not an import).
+	@u=$$($(CROSS_COMPILE)readelf -sW $(ARM_BUILD_DIR)/plugin_effect_filter.elf \
+	      | awk '$$7 == "UND" && $$8 != "" { c++ } END { print c + 0 }') ; \
+	  echo "effect_filter named-import symbols: $$u" ; \
+	  test "$$u" -eq 0 \
+	    && echo "make plugins: effect_filter is self-contained (no kernel imports)" \
+	    || { echo "FAILED: effect_filter has undefined imports"; exit 1; }
+
 # ---- M6: graph control syscalls (issue #28) -------------------------------
 $(ARM_BUILD_DIR)/plugin_controller.elf: plugins/example_controller/controller.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/controller.o

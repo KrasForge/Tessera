@@ -200,6 +200,12 @@ jobs:
       - name: Reference plugin builds as a valid AArch64 ELF with all ABI symbols
         run: make test-arm-plugin-elf CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Reference low-pass filter DSP host tests (issue #29)
+        run: make test-arm-filter
+
+      - name: All example plugins build as AArch64 ELFs (make plugins, no imports)
+        run: make plugins CROSS_COMPILE=aarch64-linux-gnu-
+
   plugin-loader-tests:
     name: M5 plugin loader - ELF reader host test + QEMU virt isolated load
     runs-on: ubuntu-22.04
