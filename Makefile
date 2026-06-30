@@ -810,7 +810,7 @@ endif
 
 ARM_CFLAGS  = $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding \
               -mgeneral-regs-only -fno-stack-protector -fno-pic -fno-pie \
-              -fno-builtin \
+              -fno-builtin -mno-outline-atomics \
               -Wall -Wextra -std=c11 -O2 -g -Iinclude/ -I$(ARCH_ARM_DIR)
 ARM_ASFLAGS = $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding -g -Iinclude/
 ARM_LDSCRIPT = $(ARCH_ARM_DIR)/kernel.ld
@@ -1212,6 +1212,19 @@ test-arm-rtsched: | $(ARM_BUILD_DIR)
 	      $(ARM_RTSCHED_TEST_SRCS) -o $(ARM_RTSCHED_TEST_BIN)
 	$(ARM_RTSCHED_TEST_BIN)
 
+# Host unit tests for the audio-core building blocks (issue #21): the lock-free
+# SPSC ring (incl. a real 2-thread cross-core stress), the overrun watchdog,
+# and the DMA refill/underrun path.  All pure C, run under ASan/UBSan.
+ARM_SMP_TEST_SRCS = tests/arm64/smp_test.c $(ARCH_ARM_DIR)/spsc_ring.c \
+                    $(ARCH_ARM_DIR)/audio_core.c
+ARM_SMP_TEST_BIN  = $(ARM_BUILD_DIR)/smp_test
+
+test-arm-smp: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_SMP_TEST_SRCS) -o $(ARM_SMP_TEST_BIN) -lpthread
+	$(ARM_SMP_TEST_BIN)
+
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
 # only leave the CPU by being preempted.  Verifies priority preemption,
@@ -1257,6 +1270,43 @@ test-arm-preempt-qemu: | $(ARM_BUILD_DIR)
 	@grep -q "PREEMPT: PASS" $(ARM_BUILD_DIR)/virt_preempt.log \
 	  && echo "QEMU virt preemptive-scheduler test PASSED" \
 	  || { echo "QEMU virt preemptive-scheduler test FAILED"; exit 1; }
+
+# Dedicated audio-core SMP test on QEMU 'virt' (issue #21): boot all four cores
+# via PSCI, pin the audio loop to CPU0 (1 kHz timer IRQ + lock-free ring +
+# watchdog), run a producer on CPU1 and busy-load on CPU2/CPU3, and verify the
+# audio cadence holds (no underrun, no overrun) under that load.  MMU off, virt
+# GIC bases, four cores.
+VIRT_SMP_ELF  = $(ARM_BUILD_DIR)/virt_smp.elf
+VIRT_SMP_SRCS = $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
+                $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/exceptions.c \
+                $(ARCH_ARM_DIR)/irq.c $(ARCH_ARM_DIR)/timer.c drivers/gic.c
+
+test-arm-smp-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/sm_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S -o $(ARM_BUILD_DIR)/sm_smpentry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S   -o $(ARM_BUILD_DIR)/sm_vectors.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/sm_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/smp_main.c -o $(ARM_BUILD_DIR)/sm_main.o
+	for s in $(VIRT_SMP_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/sm_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_SMP_ELF) \
+	    $(ARM_BUILD_DIR)/sm_start.o $(ARM_BUILD_DIR)/sm_smpentry.o \
+	    $(ARM_BUILD_DIR)/sm_main.o $(ARM_BUILD_DIR)/sm_uart.o \
+	    $(ARM_BUILD_DIR)/sm_vectors.o \
+	    $(ARM_BUILD_DIR)/sm_smp.o $(ARM_BUILD_DIR)/sm_spsc_ring.o \
+	    $(ARM_BUILD_DIR)/sm_audio_core.o $(ARM_BUILD_DIR)/sm_exceptions.o \
+	    $(ARM_BUILD_DIR)/sm_irq.o $(ARM_BUILD_DIR)/sm_timer.o \
+	    $(ARM_BUILD_DIR)/sm_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_smp.log
+	-timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_smp.log -net none \
+	    -kernel $(VIRT_SMP_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_smp.log
+	@grep -q "AUDIO-CORE: PASS" $(ARM_BUILD_DIR)/virt_smp.log \
+	  && echo "QEMU virt audio-core SMP test PASSED" \
+	  || { echo "QEMU virt audio-core SMP test FAILED"; exit 1; }
 
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
