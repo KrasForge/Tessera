@@ -11,8 +11,13 @@
 
 #include "usermode.h"
 #include "exceptions.h"
+#include "process.h"
 #include "uart_pl011.h"
 #include <stdint.h>
+
+/* Weak default so this file links even when process.c is absent (e.g. the
+ * standalone EL0 virt harness); process.c provides the strong version. */
+__attribute__((weak)) process_t *current_process(void) { return (process_t *)0; }
 
 void arm64_handle_svc(struct trapframe *tf)
 {
@@ -42,6 +47,22 @@ void arm64_handle_svc(struct trapframe *tf)
 
 void arm64_user_fault(struct trapframe *tf)
 {
-    (void)tf;
-    kernel_resume(-1);                   /* terminate the faulting process */
+    /* The faulting address (FAR_EL1) and PC (ELR_EL1) have already been
+     * logged by the exception dumper; add the process identity and access
+     * type, mark it killed, and unwind back to process_run() with -1.  The
+     * MMU already blocked the offending access, so kernel state is intact. */
+    uint32_t   ec = (uint32_t)((tf->esr_el1 >> 26) & 0x3F);
+    process_t *p  = current_process();
+
+    uart_puts("  [fault] terminating EL0 process");
+    if (p) {
+        uart_printf(" pid=%u (%s)", (unsigned)p->pid, p->name);
+        p->state = PROC_KILLED;
+    }
+    if (arm64_ec_class(ec) == EC_CLASS_DATA_ABORT)
+        uart_printf(" on %s access",
+                    arm64_abort_is_write(tf->esr_el1) ? "write" : "read");
+    uart_puts("\r\n");
+
+    kernel_resume(-1);
 }

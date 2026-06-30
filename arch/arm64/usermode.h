@@ -25,11 +25,13 @@ struct trapframe;
  *   ttbr0    - TTBR0_EL1 value to install (process root | ASID); ignored
  *              when the MMU is off
  *
+ *   arg0     - value placed in the user's x0 register at entry
+ *
  * Returns the value passed to sys_exit, or -1 if the process was killed by a
  * fault (see arm64_user_fault).  Implemented in entry.S: it saves the kernel
  * callee-saved context, ERETs to EL0, and "returns" only when sys_exit or a
  * fault calls kernel_resume(). */
-long run_user(uint64_t entry, uint64_t user_sp, uint64_t ttbr0);
+long run_user(uint64_t entry, uint64_t user_sp, uint64_t ttbr0, uint64_t arg0);
 
 /* Resume the kernel context saved by run_user(), making run_user() return
  * `code`.  Called from the SVC/fault path; never returns to its caller. */

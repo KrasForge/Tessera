@@ -33,13 +33,13 @@ void test_main(void)
     /* 1. A normal program: sys_write a greeting, then sys_exit(0). */
     uart_puts("user1 output >> ");
     long c1 = run_user((uint64_t)(uintptr_t)user_payload,
-                       (uint64_t)(uintptr_t)(ustack1 + 256), 0);
+                       (uint64_t)(uintptr_t)(ustack1 + 256), 0, 0);
     uart_printf("user1 sys_exit code=%d\r\n", (int)c1);
 
     /* 2. A program that executes a privileged instruction -> must trap and
      *    be terminated (run_user returns -1). */
     long c2 = run_user((uint64_t)(uintptr_t)user_priv_payload,
-                       (uint64_t)(uintptr_t)(ustack2 + 256), 0);
+                       (uint64_t)(uintptr_t)(ustack2 + 256), 0, 0);
     uart_printf("user2 privileged-insn code=%d\r\n", (int)c2);
 
     if (c1 == 0 && c2 == -1)

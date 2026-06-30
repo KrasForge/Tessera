@@ -41,6 +41,16 @@ ec_class_t arm64_ec_class(uint32_t ec)
     }
 }
 
+int arm64_abort_is_write(uint64_t esr)
+{
+    return (int)((esr >> 6) & 1);   /* ISS.WnR */
+}
+
+uint32_t arm64_abort_fsc(uint64_t esr)
+{
+    return (uint32_t)(esr & 0x3F);  /* DFSC / IFSC */
+}
+
 #ifndef HOSTTEST
 
 #include "uart_pl011.h"

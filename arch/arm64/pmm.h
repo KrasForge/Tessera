@@ -24,10 +24,22 @@
  * The low-peripheral MMIO window (UART, GPIO, mailbox, …) lives at
  * 0xFC000000-0xFFFFFFFF in BCM2711 "low peripheral" mode.
  * ----------------------------------------------------------------------- */
+/* Defaults are the BCM2711 (Raspberry Pi) map.  They can be overridden at
+ * build time (e.g. -DPHYS_RAM_START=...) so the same allocator and MMU code
+ * can run on other boards such as the QEMU 'virt' machine in the fault
+ * containment harness. */
+#ifndef PHYS_RAM_START
 #define PHYS_RAM_START  0x00000000UL
+#endif
+#ifndef PHYS_RAM_END
 #define PHYS_RAM_END    0x40000000UL   /* 1 GiB managed RAM */
+#endif
+#ifndef MMIO_BASE
 #define MMIO_BASE       0xFC000000UL
+#endif
+#ifndef MMIO_END
 #define MMIO_END        0x100000000UL  /* exclusive: top of 32-bit space */
+#endif
 
 /* Initialise the allocator: mark the kernel image, the boot stack, and all
  * low memory below the kernel as reserved; the remainder of RAM is free. */

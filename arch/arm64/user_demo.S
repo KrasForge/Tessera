@@ -32,3 +32,13 @@ user_priv_payload:
     mrs     x0, sctlr_el1           /* privileged read -> traps from EL0 */
 0:  b       0b
 user_priv_payload_end:
+
+/* Writes to the kernel address passed in x0 (run_user arg0).  The MMU maps
+ * kernel memory as EL1-only, so this faults and the process is killed. */
+    .global user_badwrite_payload
+    .global user_badwrite_payload_end
+user_badwrite_payload:
+    mov     x9, #0xBAD
+    str     x9, [x0]                /* write to kernel memory -> data abort */
+0:  b       0b
+user_badwrite_payload_end:

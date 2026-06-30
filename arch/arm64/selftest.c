@@ -22,6 +22,7 @@
 /* User-mode demo payloads (arch/arm64/user_demo.S). */
 extern char user_payload[], user_payload_end[];
 extern char user_priv_payload[], user_priv_payload_end[];
+extern char user_badwrite_payload[], user_badwrite_payload_end[];
 void *memcpy(void *, const void *, size_t);
 
 /* A virtual window well above the identity-mapped RAM/MMIO (4 GiB), so the
@@ -159,31 +160,26 @@ void m2_process_selftest(void)
     uart_puts("=== M2 self-test complete ===\r\n\r\n");
 }
 
-/* Run a payload at EL0 in its own address space and return the exit code. */
-static long run_user_payload(const char *name, char *code, size_t code_len)
+/* Load a payload into a fresh process: copy it into a code frame (RX) and
+ * map a user stack (RW).  Leaves the process READY; the caller runs it. */
+static process_t *load_user(const char *name, char *code, size_t code_len)
 {
     process_t *p = process_create(name);
     if (!p)
-        return -2;
+        return (process_t *)0;
 
-    /* Copy the payload into a user code frame (RX) and add a user stack (RW). */
     uintptr_t code_pa = phys_alloc_page();
     memcpy((void *)code_pa, code, code_len);
     process_map(p, code_pa, USER_VA_BASE, PAGE_SIZE, VMM_READ | VMM_EXEC);
 
     uintptr_t stack_pa = phys_alloc_page();
-    uintptr_t stack_va = USER_VA_BASE + 0x10000;
-    process_map(p, stack_pa, stack_va, PAGE_SIZE, VMM_READ | VMM_WRITE);
-
-    /* Save the kernel TTBR0, run the process, restore it. */
-    uint64_t kttbr;
-    __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(kttbr));
-    long code_ret = run_user(USER_VA_BASE, stack_va + PAGE_SIZE, p->ttbr0);
-    __asm__ volatile("msr ttbr0_el1, %0; isb" :: "r"(kttbr));
-
-    process_destroy(p);
-    return code_ret;
+    process_map(p, stack_pa, USER_VA_BASE + 0x10000, PAGE_SIZE,
+                VMM_READ | VMM_WRITE);
+    return p;
 }
+
+#define USER_ENTRY  USER_VA_BASE
+#define USER_SP     (USER_VA_BASE + 0x10000 + PAGE_SIZE)
 
 /* M2 (issue #13): EL0 entry + SVC syscall ABI. */
 void m2_user_selftest(void)
@@ -191,15 +187,55 @@ void m2_user_selftest(void)
     uart_puts("=== M2 EL0 + SVC self-test (issue #13) ===\r\n");
 
     uart_puts("user  : running EL0 program (expect a greeting below)\r\n  >> ");
-    long c1 = run_user_payload("user-demo", user_payload,
-                               (size_t)(user_payload_end - user_payload));
+    process_t *a = load_user("user-demo", user_payload,
+                             (size_t)(user_payload_end - user_payload));
+    long c1 = process_run(a, USER_ENTRY, USER_SP, 0);
+    process_destroy(a);
     uart_printf("user  : sys_write/sys_exit ......... %s (code=%d)\r\n",
                 OKBAD(c1 == 0), (int)c1);
 
-    long c2 = run_user_payload("user-priv", user_priv_payload,
-                               (size_t)(user_priv_payload_end - user_priv_payload));
+    process_t *b = load_user("user-priv", user_priv_payload,
+                             (size_t)(user_priv_payload_end - user_priv_payload));
+    long c2 = process_run(b, USER_ENTRY, USER_SP, 0);
+    process_destroy(b);
     uart_printf("user  : privileged insn trapped .... %s (code=%d)\r\n",
                 OKBAD(c2 == -1), (int)c2);
 
     uart_puts("=== M2 EL0 self-test complete ===\r\n\r\n");
+}
+
+/* M2 (issue #14): fault containment.  A process that writes to kernel memory
+ * is trapped and killed; the kernel data is intact and a second process runs
+ * normally afterwards. */
+static volatile uint64_t g_kernel_canary = 0xCAFEF00DDEADBEEFUL;
+
+void m2_fault_selftest(void)
+{
+    uart_puts("=== M2 fault-containment self-test (issue #14) ===\r\n");
+
+    uint64_t before = g_kernel_canary;
+
+    /* Process A tries to overwrite a kernel variable. */
+    process_t *a = load_user("bad-plugin", user_badwrite_payload,
+                             (size_t)(user_badwrite_payload_end - user_badwrite_payload));
+    long ca = process_run(a, USER_ENTRY, USER_SP, (uint64_t)(uintptr_t)&g_kernel_canary);
+    int killed = (ca == -1) && (a->state == PROC_KILLED);
+    process_destroy(a);
+    uart_printf("fault : bad-write process killed ... %s (code=%d)\r\n",
+                OKBAD(killed), (int)ca);
+
+    /* The MMU blocked the write before it landed, so the canary is intact. */
+    uart_printf("fault : kernel data intact ......... %s\r\n",
+                OKBAD(g_kernel_canary == before));
+
+    /* The kernel keeps running: a second process executes normally. */
+    uart_puts("fault : second process output\r\n  >> ");
+    process_t *b = load_user("good-plugin", user_payload,
+                             (size_t)(user_payload_end - user_payload));
+    long cb = process_run(b, USER_ENTRY, USER_SP, 0);
+    process_destroy(b);
+    uart_printf("fault : second process continues ... %s (code=%d)\r\n",
+                OKBAD(cb == 0), (int)cb);
+
+    uart_puts("=== M2 fault-containment complete ===\r\n\r\n");
 }
