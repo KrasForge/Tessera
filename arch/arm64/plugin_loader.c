@@ -138,3 +138,16 @@ long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size)
 
     return process_run(pl->proc, pl->entry_va, pl->stack_top, pl->param_va);
 }
+
+long plugin_call_abi_version(plugin_t *pl)
+{
+    if (!pl->abi_version_va)
+        return -1;
+    /* Reuse the trampoline: call abi_version (it ignores the rate/size args)
+     * and exit with its return value. */
+    *(volatile uint64_t *)(pl->param_pa + 0) = pl->abi_version_va;
+    *(volatile uint32_t *)(pl->param_pa + 8) = 0;
+    *(volatile uint32_t *)(pl->param_pa + 12) = 0;
+
+    return process_run(pl->proc, pl->entry_va, pl->stack_top, pl->param_va);
+}

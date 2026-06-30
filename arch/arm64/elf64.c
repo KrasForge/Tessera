@@ -148,3 +148,31 @@ int elf64_undefined_count(const void *img, size_t len)
             n++;
     return n;
 }
+
+int elf64_disallowed_imports(const void *img, size_t len,
+                             const char *const *allowed, int n_allowed)
+{
+    const char *strtab; uint64_t strsz;
+    const Elf64_Shdr *sym = find_symtab(img, len, &strtab, &strsz);
+    if (!sym)
+        return 0;
+
+    uint64_t count = sym->sh_size / sizeof(Elf64_Sym);
+    const Elf64_Sym *st = at(img, len, sym->sh_offset, sym->sh_size);
+    if (!st)
+        return 0;
+
+    int bad = 0;
+    for (uint64_t i = 0; i < count; i++) {
+        if (st[i].st_shndx != SHN_UNDEF || st[i].st_name == 0 ||
+            st[i].st_name >= strsz || strtab[st[i].st_name] == '\0')
+            continue;
+        const char *name = strtab + st[i].st_name;
+        int ok = 0;
+        for (int a = 0; a < n_allowed && !ok; a++)
+            ok = streq_bounded(name, allowed[a], strsz - st[i].st_name);
+        if (!ok)
+            bad++;
+    }
+    return bad;
+}

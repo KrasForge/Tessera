@@ -1324,6 +1324,21 @@ test-arm-plugin-elf: | $(ARM_BUILD_DIR)
 	done
 	@echo "plugin ABI ELF test PASSED"
 
+# ---- M8: SD/FAT plugin loading (issue #34) --------------------------------
+# Host unit tests for the FAT16 reader.
+ARM_FAT_TEST_SRCS = tests/arm64/fat_test.c $(ARCH_ARM_DIR)/fat.c
+test-arm-fat: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_FAT_TEST_SRCS) -o $(ARM_BUILD_DIR)/fat_test
+	$(ARM_BUILD_DIR)/fat_test
+
+# Host unit tests for the plugin VFS path resolver (ramdisk + SD).
+ARM_VFS_TEST_SRCS = tests/arm64/vfs_test.c $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c
+test-arm-vfs: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_VFS_TEST_SRCS) -o $(ARM_BUILD_DIR)/arm_vfs_test
+	$(ARM_BUILD_DIR)/arm_vfs_test
+
 # ---- M5: plugin loader (issue #24) ----------------------------------------
 # Build the example plugins as isolated AArch64 executables (PT_LOAD segments,
 # linked at USER_VA_BASE) for the loader to map into a fresh address space.
@@ -1745,6 +1760,18 @@ $(ARM_BUILD_DIR)/plugin_ctl2.elf: plugins/example_ctl2/ctl2.c $(PLUGIN_LD) | $(A
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/ctl2.o
 	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/ctl2.o
 
+# M8 rejection-test plugins (issue #34).  badabi reports an incompatible ABI
+# major version; badimport pulls in a symbol outside the plugin ABI - linked
+# with --unresolved-symbols=ignore-all so the forbidden import survives into the
+# symbol table for the loader to catch instead of failing the link.
+$(ARM_BUILD_DIR)/plugin_badabi.elf: plugins/example_badabi/badabi.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/badabi.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/badabi.o
+
+$(ARM_BUILD_DIR)/plugin_badimport.elf: plugins/example_badimport/badimport.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/badimport.o
+	$(ARM_LD) -shared -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/badimport.o
+
 # Full control-syscall test on QEMU 'virt' (MMU on): leak-free load/unload,
 # parameter delivery, and all five syscalls callable from EL0.
 VIRT_CTL_ELF  = $(ARM_BUILD_DIR)/virt_control.elf
@@ -1754,7 +1781,8 @@ VIRT_CTL_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
                 $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
                 $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
                 $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
-                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/string.c
+                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+                $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/string.c
 
 test-arm-control-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plugin_echo.elf \
                        $(ARM_BUILD_DIR)/plugin_ctl2.elf
@@ -1780,7 +1808,8 @@ test-arm-control-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plugin_
 	    $(ARM_BUILD_DIR)/ct_elf64.o $(ARM_BUILD_DIR)/ct_plugin_loader.o \
 	    $(ARM_BUILD_DIR)/ct_audio_ringbuf.o $(ARM_BUILD_DIR)/ct_audio_graph.o \
 	    $(ARM_BUILD_DIR)/ct_graph_control.o $(ARM_BUILD_DIR)/ct_param_queue.o \
-	    $(ARM_BUILD_DIR)/ct_plugin_mgr.o $(ARM_BUILD_DIR)/ct_string.o
+	    $(ARM_BUILD_DIR)/ct_plugin_mgr.o $(ARM_BUILD_DIR)/ct_vfs.o \
+	    $(ARM_BUILD_DIR)/ct_fat.o $(ARM_BUILD_DIR)/ct_string.o
 	rm -f $(ARM_BUILD_DIR)/virt_control.log
 	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
 	    -display none -serial file:$(ARM_BUILD_DIR)/virt_control.log -net none \
@@ -1789,6 +1818,56 @@ test-arm-control-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plugin_
 	@grep -q "CONTROL: PASS" $(ARM_BUILD_DIR)/virt_control.log \
 	  && echo "QEMU virt control-syscall test PASSED" \
 	  || { echo "QEMU virt control-syscall test FAILED"; exit 1; }
+
+# Full-stack SD/FAT loader test on QEMU 'virt' (MMU on, issue #34): load a
+# plugin from an in-RAM FAT16 "SD card" by path, load the same loader from the
+# ramdisk, and reject a wrong-ABI plugin, a disallowed-import plugin, and a
+# missing path - all in isolated address spaces with no leaks.
+VIRT_SD_ELF  = $(ARM_BUILD_DIR)/virt_sd.elf
+VIRT_SD_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+               $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+               $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+               $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+               $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+               $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+               $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/string.c
+
+test-arm-sd-load-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf \
+                       $(ARM_BUILD_DIR)/plugin_badabi.elf \
+                       $(ARM_BUILD_DIR)/plugin_badimport.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/sd_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/sd_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/sd_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/sd_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/sd_blob.S             -o $(ARM_BUILD_DIR)/sd_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/sd_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/sd_main.c -o $(ARM_BUILD_DIR)/sd_main.o
+	for s in $(VIRT_SD_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/sd_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_SD_ELF) \
+	    $(ARM_BUILD_DIR)/sd_start.o $(ARM_BUILD_DIR)/sd_main.o \
+	    $(ARM_BUILD_DIR)/sd_uart.o $(ARM_BUILD_DIR)/sd_vectors.o \
+	    $(ARM_BUILD_DIR)/sd_entry.o $(ARM_BUILD_DIR)/sd_tramp.o \
+	    $(ARM_BUILD_DIR)/sd_blob.o \
+	    $(ARM_BUILD_DIR)/sd_pmm.o $(ARM_BUILD_DIR)/sd_mmu.o \
+	    $(ARM_BUILD_DIR)/sd_vmem.o $(ARM_BUILD_DIR)/sd_process.o \
+	    $(ARM_BUILD_DIR)/sd_exceptions.o $(ARM_BUILD_DIR)/sd_syscalls.o \
+	    $(ARM_BUILD_DIR)/sd_elf64.o $(ARM_BUILD_DIR)/sd_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/sd_audio_ringbuf.o $(ARM_BUILD_DIR)/sd_audio_graph.o \
+	    $(ARM_BUILD_DIR)/sd_graph_control.o $(ARM_BUILD_DIR)/sd_param_queue.o \
+	    $(ARM_BUILD_DIR)/sd_plugin_mgr.o $(ARM_BUILD_DIR)/sd_vfs.o \
+	    $(ARM_BUILD_DIR)/sd_fat.o $(ARM_BUILD_DIR)/sd_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_sd.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_sd.log -net none \
+	    -kernel $(VIRT_SD_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_sd.log
+	@grep -q "SD: PASS" $(ARM_BUILD_DIR)/virt_sd.log \
+	  && echo "QEMU virt SD/FAT loader test PASSED" \
+	  || { echo "QEMU virt SD/FAT loader test FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can

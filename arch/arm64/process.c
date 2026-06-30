@@ -154,6 +154,14 @@ void process_set_current(process_t *p)
 }
 
 #ifndef HOSTTEST   /* process_run drops to EL0 (entry.S) and touches TTBR0 */
+
+/* run_user()/kernel_resume() stash the kernel's resume context in this single
+ * global slot (entry.S).  A nested process_run() - e.g. the ABI-version
+ * handshake the plugin manager runs while it is itself servicing an EL0 syscall
+ * from another process - would overwrite the outer process's saved context, so
+ * we preserve and restore it around the inner run to keep run_user re-entrant. */
+extern unsigned char g_kresume[112];
+
 long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
 {
     if (!p || p->state == PROC_UNUSED)
@@ -164,13 +172,22 @@ long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
     uint64_t kttbr;
     __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(kttbr));
 
+    /* Snapshot any outer run_user() context before the nested run clobbers it. */
+    unsigned char saved_kresume[112];
+    for (int i = 0; i < 112; i++)
+        saved_kresume[i] = g_kresume[i];
+
+    process_t *prev = g_current;
     g_current = p;
     p->state  = PROC_RUNNING;
 
     long code = run_user(entry, user_sp, p->ttbr0, arg0);
 
+    for (int i = 0; i < 112; i++)
+        g_kresume[i] = saved_kresume[i];
+
     __asm__ volatile("msr ttbr0_el1, %0; isb" :: "r"(kttbr));
-    g_current = (process_t *)0;
+    g_current = prev;
 
     p->exit_code = code;
     p->state = (code < 0) ? PROC_KILLED : PROC_ZOMBIE;

@@ -53,6 +53,11 @@ int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name);
  * killed by the MMU. */
 long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size);
 
+/* Run the plugin's plugin_abi_version() handshake at EL0 (the safe, designated
+ * first call) and return the version it reports, or -1 if the symbol is missing
+ * or the call faulted.  Used to validate the ABI before plugin_init runs. */
+long plugin_call_abi_version(plugin_t *pl);
+
 /* Map an existing physical region [pa, pa+bytes) into the plugin's address
  * space at `va` with `flags` (VMM_*).  Used to share the audio ring buffer
  * (issue #25) into the plugin at a fixed VA without copying.  Returns 0 on

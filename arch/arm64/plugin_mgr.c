@@ -4,24 +4,19 @@
 #include "plugin_loader.h"
 #include "param_queue.h"
 #include "graph_control.h"
+#include "elf64.h"
+#include "vfs.h"
 #include "process.h"
 #include "vmem.h"
 #include "pmm.h"
 #include "pmem.h"
+#include "plugin_abi.h"
 #include <stdint.h>
 #include <stddef.h>
 
-/* Bounded string compare (no libc in the kernel). */
-static int streq(const char *a, const char *b)
-{
-    for (int i = 0; i < 64; i++) {
-        if (a[i] != b[i])
-            return 0;
-        if (a[i] == '\0')
-            return 1;
-    }
-    return 0;
-}
+/* Scratch buffer for reading an ELF off the SD card before it is mapped: a
+ * generous upper bound on plugin image size (256 KiB == 64 pages). */
+#define PM_SCRATCH_PAGES 64
 
 void pm_init(plugin_mgr_t *m, graph_control_t *gc)
 {
@@ -30,19 +25,19 @@ void pm_init(plugin_mgr_t *m, graph_control_t *gc)
         m->slots[i].pid  = 0;
         m->slots[i].pq   = (param_queue_t *)0;
     }
-    m->n_blobs = 0;
-    m->gc      = gc;
+    vfs_init(&m->vfs);
+    m->gc = gc;
 }
 
 int pm_register_blob(plugin_mgr_t *m, const char *name, void *blob, size_t len)
 {
-    if (m->n_blobs >= PM_MAX_PLUGINS)
-        return PM_ENOMEM;
-    m->blobs[m->n_blobs].name = name;
-    m->blobs[m->n_blobs].blob = blob;
-    m->blobs[m->n_blobs].len  = len;
-    m->n_blobs++;
-    return PM_OK;
+    return vfs_add_ramdisk(&m->vfs, name, (const uint8_t *)blob, (uint32_t)len)
+               ? PM_ENOMEM : PM_OK;
+}
+
+void pm_mount_sd(plugin_mgr_t *m, fat_fs_t *fat)
+{
+    vfs_mount_sd(&m->vfs, fat);
 }
 
 static pm_slot_t *slot_by_pid(plugin_mgr_t *m, uint32_t pid)
@@ -55,20 +50,61 @@ static pm_slot_t *slot_by_pid(plugin_mgr_t *m, uint32_t pid)
 
 long pm_load(plugin_mgr_t *m, const char *path)
 {
-    const pm_blob_t *b = (const pm_blob_t *)0;
-    for (int i = 0; i < m->n_blobs; i++)
-        if (streq(m->blobs[i].name, path)) { b = &m->blobs[i]; break; }
-    if (!b)
-        return PM_ENOENT;
-
     pm_slot_t *s = (pm_slot_t *)0;
     for (int i = 0; i < PM_MAX_PLUGINS; i++)
         if (!m->slots[i].used) { s = &m->slots[i]; break; }
     if (!s)
         return PM_ENOMEM;
 
-    if (plugin_load(&s->plugin, b->blob, b->len, b->name) != PLUGIN_OK)
+    /* Resolve the path to ELF bytes.  Ramdisk files resolve zero-copy; an SD
+     * file is read into a scratch buffer that we free once plugin_load() has
+     * copied the segments into the plugin's own pages. */
+    uintptr_t scratch_pa = 0;
+    uint8_t  *scratch    = (uint8_t *)0;
+    if (path[0] == '/' && path[1] == 's' && path[2] == 'd' && path[3] == '/') {
+        scratch_pa = phys_alloc_contig(PM_SCRATCH_PAGES);
+        if (!scratch_pa)
+            return PM_ENOMEM;
+        scratch = (uint8_t *)P2V(scratch_pa);
+    }
+
+    const uint8_t *elf = (const uint8_t *)0;
+    long n = vfs_resolve(&m->vfs, path, &elf, scratch,
+                         PM_SCRATCH_PAGES * PAGE_SIZE);
+    if (n < 0 || !elf) {
+        if (scratch_pa) phys_free_contig(scratch_pa, PM_SCRATCH_PAGES);
+        return PM_ENOENT;
+    }
+
+    /* Validate the image before it ever runs: a well-formed AArch64 ELF that
+     * imports nothing outside the plugin ABI (a self-contained plugin imports
+     * nothing at all -> allowed list is empty). */
+    if (elf64_validate(elf, (size_t)n) != 0) {
+        if (scratch_pa) phys_free_contig(scratch_pa, PM_SCRATCH_PAGES);
         return PM_EBADELF;
+    }
+    if (elf64_disallowed_imports(elf, (size_t)n, (const char *const *)0, 0) != 0) {
+        if (scratch_pa) phys_free_contig(scratch_pa, PM_SCRATCH_PAGES);
+        return PM_EIMPORT;
+    }
+
+    int lr = plugin_load(&s->plugin, elf, (size_t)n, path);
+
+    /* The plugin owns its pages now; the scratch read buffer is done with. */
+    if (scratch_pa) phys_free_contig(scratch_pa, PM_SCRATCH_PAGES);
+
+    if (lr != PLUGIN_OK)
+        return PM_EBADELF;
+
+    /* ABI handshake at EL0: the plugin must report a matching major version
+     * before plugin_init() is ever entered.  A faulting / missing handshake
+     * (-1) or a mismatched major rejects the load and tears the process down. */
+    long ver = plugin_call_abi_version(&s->plugin);
+    if (ver < 0 ||
+        ((uint32_t)ver >> 16) != TESSERA_PLUGIN_ABI_VERSION_MAJOR) {
+        process_destroy(s->plugin.proc);
+        return PM_EABI;
+    }
 
     /* Per-plugin parameter queue, mapped into the plugin at PARAM_Q_VA. */
     size_t pqpages = (pq_bytes(PM_PARAM_CAP) + PAGE_SIZE - 1) / PAGE_SIZE;

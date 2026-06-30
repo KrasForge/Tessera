@@ -378,3 +378,28 @@ jobs:
 
       - name: Boot context-switch harness on QEMU virt (round-robin + FPU)
         run: make test-arm-sched-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
+  sd-loader-tests:
+    name: M8 SD loader - FAT/VFS host tests + QEMU virt load-from-SD + validation
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: FAT16 reader host unit tests (ASan + UBSan)
+        run: make test-arm-fat
+
+      - name: Plugin VFS path-resolver host unit tests (ramdisk + SD, ASan + UBSan)
+        run: make test-arm-vfs
+
+      - name: ELF64 reader host unit tests (import allow-list, ASan + UBSan)
+        run: make test-arm-elf
+
+      - name: Load plugin from FAT SD card + reject wrong ABI/import on QEMU virt
+        run: make test-arm-sd-load-qemu CROSS_COMPILE=aarch64-linux-gnu-
