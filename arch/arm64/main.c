@@ -1,4 +1,4 @@
-/* arch/arm64/main.c — Tessera AArch64 C entry point (Issues #2, #3, #4)
+/* arch/arm64/main.c — Tessera AArch64 C entry point (M0 + M1)
  *
  * Called from boot/start.S after:
  *   - EL2 → EL1 transition (or direct EL1 entry under QEMU)
@@ -9,12 +9,20 @@
  *   - GPIO subsystem and CM4 on-board LED (GPIO 42, active-high) [Issue #4]
  *   - PL011 UART at 115200 8N1, polled [Issue #3]
  *   - Boot banner "Tessera ARM boot OK\r\n" (required by CI smoke test) [Issue #5]
+ *   - M1 virtual memory: physical allocator [#7], ARMv8 MMU [#8/#9],
+ *     VMM API + kalloc + ASID [#10], followed by a UART self-test.
  *   - 1 Hz LED heartbeat loop to demonstrate system-counter and GPIO [Issue #4]
  */
 
 #include "gpio.h"
 #include "uart_pl011.h"
+#include "pmm.h"
+#include "mmu.h"
+#include "kheap.h"
 #include <stdint.h>
+
+/* M1 self-test (arch/arm64/selftest.c). */
+void m1_selftest(void);
 
 /* CM4 / Pi 4 on-board LED.  GPIO 42, active-high (BCM2711 datasheet §5). */
 #define CM4_LED_PIN 42u
@@ -49,6 +57,20 @@ void kmain(void)
     __asm__ volatile("mrs %0, CurrentEL" : "=r"(el));
     el >>= 2;
     uart_printf("Running at EL%u\r\n", (unsigned)el);
+
+    /* ---- M1: virtual memory bring-up -------------------------------- */
+    pmm_init();
+    uart_printf("PMM : %u MiB managed RAM, %u free frames\r\n",
+                (unsigned)((PHYS_RAM_END - PHYS_RAM_START) >> 20),
+                (unsigned)pmm_free_pages());
+
+    mmu_init();          /* identity map + MMU/caches on; UART must survive */
+    uart_puts("MMU : enabled (4 KiB granule, identity map, caches on)\r\n");
+
+    kheap_init();
+    uart_puts("KHEAP: initialised\r\n");
+
+    m1_selftest();
 
     /* 1 Hz LED heartbeat: 500 ms on, 500 ms off. */
     while (1) {
