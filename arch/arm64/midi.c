@@ -27,6 +27,8 @@ static int emit(const midi_parser_t *p, midi_event_t *out)
     uint8_t hi = p->status & 0xF0u;
     uint8_t ch = p->status & 0x0Fu;
 
+    out->source = INPUT_SRC_MIDI;       /* parser events are always MIDI */
+
     if (hi == 0x90) {
         /* Note On; velocity 0 is the conventional Note Off. */
         out->type    = (p->data[1] == 0) ? MIDI_NOTE_OFF : MIDI_NOTE_ON;
