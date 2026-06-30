@@ -46,6 +46,9 @@ typedef struct process {
     long         exit_code; /* sys_exit value, or -1 if killed by a fault   */
     char         name[16];
     volatile uint32_t *liveness; /* shared-ring status word, or NULL (#26)   */
+    uint64_t     svc_gate;  /* sandbox: if non-zero, the only page from which
+                             * an SVC is honoured; an SVC from anywhere else
+                             * kills the process (issue #35).  0 = ungated.   */
 } process_t;
 
 /* Value the kernel writes to *liveness when the process is killed; matches
@@ -55,6 +58,12 @@ typedef struct process {
 /* Register a kernel-writable status word (e.g. a shared audio-ring header
  * field) that the kernel sets to PROC_LIVENESS_DEAD when p is killed. */
 void process_set_liveness(process_t *p, volatile uint32_t *status);
+
+/* Sandbox the process so the only SVC site the kernel will honour is the page
+ * starting at `gate_va` (the controlled entry trampoline).  Any SVC issued
+ * from the plugin's own code is then a protocol violation that kills it
+ * (issue #35).  Pass 0 to remove the gate.  va must be page-aligned. */
+void process_set_svc_gate(process_t *p, uint64_t gate_va);
 
 /* Allocate a process and its empty user address space.  Returns NULL if the
  * process table, ASID space, or physical memory is exhausted. */

@@ -1339,6 +1339,13 @@ test-arm-vfs: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_VFS_TEST_SRCS) -o $(ARM_BUILD_DIR)/arm_vfs_test
 	$(ARM_BUILD_DIR)/arm_vfs_test
 
+# Host unit tests for the sandbox audit helpers (containment + PTE classify).
+ARM_SANDBOX_TEST_SRCS = tests/arm64/sandbox_test.c $(ARCH_ARM_DIR)/sandbox.c
+test-arm-sandbox: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_SANDBOX_TEST_SRCS) -o $(ARM_BUILD_DIR)/sandbox_test
+	$(ARM_BUILD_DIR)/sandbox_test
+
 # ---- M5: plugin loader (issue #24) ----------------------------------------
 # Build the example plugins as isolated AArch64 executables (PT_LOAD segments,
 # linked at USER_VA_BASE) for the loader to map into a fresh address space.
@@ -1772,6 +1779,16 @@ $(ARM_BUILD_DIR)/plugin_badimport.elf: plugins/example_badimport/badimport.c $(P
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/badimport.o
 	$(ARM_LD) -shared -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/badimport.o
 
+# M8 sandbox-test plugins (issue #35): sbsvc issues a syscall from its own body;
+# sbmem dereferences memory it was never granted.  Both are killed at run.
+$(ARM_BUILD_DIR)/plugin_sbsvc.elf: plugins/example_sbsvc/sbsvc.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/sbsvc.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/sbsvc.o
+
+$(ARM_BUILD_DIR)/plugin_sbmem.elf: plugins/example_sbmem/sbmem.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/sbmem.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/sbmem.o
+
 # Full control-syscall test on QEMU 'virt' (MMU on): leak-free load/unload,
 # parameter delivery, and all five syscalls callable from EL0.
 VIRT_CTL_ELF  = $(ARM_BUILD_DIR)/virt_control.elf
@@ -1868,6 +1885,58 @@ test-arm-sd-load-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf \
 	@grep -q "SD: PASS" $(ARM_BUILD_DIR)/virt_sd.log \
 	  && echo "QEMU virt SD/FAT loader test PASSED" \
 	  || { echo "QEMU virt SD/FAT loader test FAILED"; exit 1; }
+
+# Full-stack sandbox test on QEMU 'virt' (MMU on, issue #35): audit a loaded
+# plugin's page tables (clean + catches an injected mapping), kill a plugin
+# that issues an SVC from its body, and kill a plugin that touches memory it
+# was never granted.
+VIRT_SB_ELF  = $(ARM_BUILD_DIR)/virt_sandbox.elf
+VIRT_SB_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+               $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+               $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+               $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+               $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+               $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+               $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/sandbox.c \
+               $(ARCH_ARM_DIR)/string.c
+
+test-arm-sandbox-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf \
+                       $(ARM_BUILD_DIR)/plugin_sbsvc.elf \
+                       $(ARM_BUILD_DIR)/plugin_sbmem.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/sb_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/sb_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/sb_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/sb_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/sandbox_blob.S         -o $(ARM_BUILD_DIR)/sb_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/sb_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/sandbox_main.c -o $(ARM_BUILD_DIR)/sb_main.o
+	for s in $(VIRT_SB_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/sb_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_SB_ELF) \
+	    $(ARM_BUILD_DIR)/sb_start.o $(ARM_BUILD_DIR)/sb_main.o \
+	    $(ARM_BUILD_DIR)/sb_uart.o $(ARM_BUILD_DIR)/sb_vectors.o \
+	    $(ARM_BUILD_DIR)/sb_entry.o $(ARM_BUILD_DIR)/sb_tramp.o \
+	    $(ARM_BUILD_DIR)/sb_blob.o \
+	    $(ARM_BUILD_DIR)/sb_pmm.o $(ARM_BUILD_DIR)/sb_mmu.o \
+	    $(ARM_BUILD_DIR)/sb_vmem.o $(ARM_BUILD_DIR)/sb_process.o \
+	    $(ARM_BUILD_DIR)/sb_exceptions.o $(ARM_BUILD_DIR)/sb_syscalls.o \
+	    $(ARM_BUILD_DIR)/sb_elf64.o $(ARM_BUILD_DIR)/sb_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/sb_audio_ringbuf.o $(ARM_BUILD_DIR)/sb_audio_graph.o \
+	    $(ARM_BUILD_DIR)/sb_graph_control.o $(ARM_BUILD_DIR)/sb_param_queue.o \
+	    $(ARM_BUILD_DIR)/sb_plugin_mgr.o $(ARM_BUILD_DIR)/sb_vfs.o \
+	    $(ARM_BUILD_DIR)/sb_fat.o $(ARM_BUILD_DIR)/sb_sandbox.o \
+	    $(ARM_BUILD_DIR)/sb_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_sandbox.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_sandbox.log -net none \
+	    -kernel $(VIRT_SB_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_sandbox.log
+	@grep -q "SANDBOX: PASS" $(ARM_BUILD_DIR)/virt_sandbox.log \
+	  && echo "QEMU virt sandbox test PASSED" \
+	  || { echo "QEMU virt sandbox test FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can

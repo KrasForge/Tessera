@@ -65,6 +65,7 @@ process_t *process_create(const char *name)
     p->ttbr0  = vmm_make_ttbr(pgd_pa, asid);
     p->state  = PROC_READY;
     p->liveness = (volatile uint32_t *)0;
+    p->svc_gate = 0;
     copy_name(p->name, name);
     return p;
 }
@@ -73,6 +74,12 @@ void process_set_liveness(process_t *p, volatile uint32_t *status)
 {
     if (p)
         p->liveness = status;
+}
+
+void process_set_svc_gate(process_t *p, uint64_t gate_va)
+{
+    if (p)
+        p->svc_gate = gate_va;
 }
 
 int process_map(process_t *p, uintptr_t pa, uintptr_t va, size_t size,

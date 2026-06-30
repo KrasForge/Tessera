@@ -96,6 +96,11 @@ long pm_load(plugin_mgr_t *m, const char *path)
     if (lr != PLUGIN_OK)
         return PM_EBADELF;
 
+    /* Sandbox the plugin: the only SVC the kernel will honour from it is the
+     * controlled exit issued by its entry trampoline; any syscall from the
+     * plugin's own body is fatal (issue #35). */
+    process_set_svc_gate(s->plugin.proc, PLUGIN_TRAMP_VA);
+
     /* ABI handshake at EL0: the plugin must report a matching major version
      * before plugin_init() is ever entered.  A faulting / missing handshake
      * (-1) or a mismatched major rejects the load and tears the process down. */
