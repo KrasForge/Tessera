@@ -6,6 +6,7 @@
 #include "process.h"
 #include "vmem.h"
 #include "pmm.h"
+#include "sandbox.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -13,6 +14,19 @@ void *memcpy(void *, const void *, size_t);
 
 /* The EL0 entry trampoline (plugin_trampoline.S). */
 extern char plugin_tramp_start[], plugin_tramp_end[];
+
+/* Record a mapped region so sandbox_audit() has an exact allowlist (#35). */
+static void record_region(plugin_t *pl, uint64_t va, uint64_t len, unsigned flags)
+{
+    uint64_t start = va & ~(PAGE_SIZE - 1);
+    uint64_t end   = (va + len + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    if (pl->n_regions < PLUGIN_MAX_REGIONS) {
+        pl->regions[pl->n_regions].va    = start;
+        pl->regions[pl->n_regions].len   = end - start;
+        pl->regions[pl->n_regions].flags = flags;
+        pl->n_regions++;
+    }
+}
 
 static unsigned perms_from_pflags(uint32_t pf)
 {
@@ -56,6 +70,7 @@ static int map_segment(plugin_t *pl, const unsigned char *elf, size_t len,
         if (process_map(pl->proc, pa, page, PAGE_SIZE, flags) != 0)
             return PLUGIN_ENOMEM;
     }
+    record_region(pl, seg_va, memsz, flags);
     return PLUGIN_OK;
 }
 
@@ -98,6 +113,7 @@ int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name)
                             VMM_READ | VMM_WRITE) != 0)
         return PLUGIN_ENOMEM;
     pl->stack_top = PLUGIN_STACK_VA + PAGE_SIZE;
+    record_region(pl, PLUGIN_STACK_VA, PAGE_SIZE, VMM_READ | VMM_WRITE);
 
     /* Entry trampoline (RX): copy the host code into a plugin page. */
     uintptr_t tpa = phys_alloc_page_zero();
@@ -109,6 +125,7 @@ int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name)
                     VMM_READ | VMM_EXEC) != 0)
         return PLUGIN_ENOMEM;
     pl->entry_va = PLUGIN_TRAMP_VA;
+    record_region(pl, PLUGIN_TRAMP_VA, PAGE_SIZE, VMM_READ | VMM_EXEC);
 
     /* Parameter page (RW): kept also kernel-visible (identity PA) so the host
      * can write the call arguments before each entry. */
@@ -118,6 +135,7 @@ int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name)
         return PLUGIN_ENOMEM;
     pl->param_pa = ppa;
     pl->param_va = PLUGIN_PARAM_VA;
+    record_region(pl, PLUGIN_PARAM_VA, PAGE_SIZE, VMM_READ | VMM_WRITE);
 
     return PLUGIN_OK;
 }
@@ -126,7 +144,21 @@ int plugin_map_region(plugin_t *pl, uint64_t va, uintptr_t pa, size_t bytes,
                       unsigned flags)
 {
     size_t mapped = (bytes + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    return process_map(pl->proc, pa, va, mapped, flags);
+    int rc = process_map(pl->proc, pa, va, mapped, flags);
+    if (rc == 0)
+        record_region(pl, va, mapped, flags);
+    return rc;
+}
+
+int plugin_sandbox_regions(const plugin_t *pl, struct sandbox_region *out, int max)
+{
+    int n = 0;
+    for (int i = 0; i < pl->n_regions && n < max; i++) {
+        out[n].va  = pl->regions[i].va;
+        out[n].len = pl->regions[i].len;
+        n++;
+    }
+    return n;
 }
 
 long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size)

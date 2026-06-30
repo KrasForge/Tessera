@@ -18,11 +18,23 @@
 #include <stdint.h>
 #include <stddef.h>
 
+struct sandbox_region;   /* arch/arm64/sandbox.h */
+
 /* Fixed VAs in the plugin's address space, placed well above the (tiny) ELF
  * segments at USER_VA_BASE so they never collide. */
 #define PLUGIN_STACK_VA  (USER_VA_BASE + 0x08000000ull)
 #define PLUGIN_TRAMP_VA  (USER_VA_BASE + 0x09000000ull)
 #define PLUGIN_PARAM_VA  (USER_VA_BASE + 0x0A000000ull)
+
+/* A mapped region of the plugin's address space, recorded as the loader maps
+ * it so the sandbox audit (issue #35) has an exact allowlist of what should be
+ * present - and nothing else. */
+#define PLUGIN_MAX_REGIONS 16
+typedef struct {
+    uint64_t va;
+    uint64_t len;
+    unsigned flags;          /* VMM_* the region was mapped with */
+} plugin_region_t;
 
 typedef struct {
     process_t *proc;
@@ -35,6 +47,8 @@ typedef struct {
     uint64_t   stack_top;
     uint64_t   param_va;
     uintptr_t  param_pa;     /* kernel-visible alias of the param page */
+    plugin_region_t regions[PLUGIN_MAX_REGIONS];
+    int        n_regions;
 } plugin_t;
 
 /* Errors. */
@@ -64,5 +78,10 @@ long plugin_call_abi_version(plugin_t *pl);
  * success. */
 int plugin_map_region(plugin_t *pl, uint64_t va, uintptr_t pa, size_t bytes,
                       unsigned flags);
+
+/* Copy the plugin's recorded mapped regions into `out` (capacity `max`) as
+ * page-granular [va, len) windows for sandbox_audit().  Returns the count. */
+int plugin_sandbox_regions(const plugin_t *pl, struct sandbox_region *out,
+                           int max);
 
 #endif /* ARM64_PLUGIN_LOADER_H */

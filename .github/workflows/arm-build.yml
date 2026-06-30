@@ -403,3 +403,22 @@ jobs:
 
       - name: Load plugin from FAT SD card + reject wrong ABI/import on QEMU virt
         run: make test-arm-sd-load-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
+  sandbox-tests:
+    name: M8 sandbox - audit-helper host test + QEMU virt airtight-sandbox proof
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Sandbox audit-helper host unit tests (containment + PTE, ASan + UBSan)
+        run: make test-arm-sandbox
+
+      - name: Sandbox airtight on QEMU virt (audit clean + catch mapping, SVC/mem kill)
+        run: make test-arm-sandbox-qemu CROSS_COMPILE=aarch64-linux-gnu-

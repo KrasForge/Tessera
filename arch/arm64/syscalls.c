@@ -15,6 +15,10 @@
 #include "uart_pl011.h"
 #include <stdint.h>
 
+/* Size of the controlled-entry trampoline window; an SVC whose return address
+ * falls outside it (for a sandboxed process) is a protocol violation (#35). */
+#define SVC_GATE_PAGE 4096ull
+
 /* Weak default so this file links even when process.c is absent (e.g. the
  * standalone EL0 virt harness); process.c provides the strong version. */
 __attribute__((weak)) process_t *current_process(void) { return (process_t *)0; }
@@ -45,6 +49,27 @@ void arm64_handle_svc(struct trapframe *tf)
 {
     uint64_t num = tf->x[8];
     syscall_trace(num);
+
+    /* Sandbox enforcement (issue #35): a gated process (an untrusted plugin)
+     * may only reach the kernel through its controlled entry trampoline.  The
+     * SVC's preferred return address (ELR_EL1, the instruction after the SVC)
+     * lies in the trampoline page for the sanctioned exit, but in the plugin's
+     * own code if the plugin body issued the SVC - which is forbidden, so we
+     * kill it instead of servicing the call. */
+    process_t *gp = current_process();
+    if (gp && gp->svc_gate) {
+        uint64_t elr = tf->elr_el1;
+        if (elr < gp->svc_gate || elr >= gp->svc_gate + SVC_GATE_PAGE) {
+            uart_printf("  [sandbox] illegal SVC #%u from pid=%u (%s)\r\n",
+                        (unsigned)num, (unsigned)gp->pid, gp->name);
+            gp->state = PROC_KILLED;
+            if (sched_active())
+                sched_kill(tf);
+            else
+                kernel_resume(-1);
+            return;                 /* unreachable */
+        }
+    }
 
     switch (num) {
     case SYS_WRITE: {
