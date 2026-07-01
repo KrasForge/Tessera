@@ -422,3 +422,19 @@ jobs:
 
       - name: Sandbox airtight on QEMU virt (audit clean + catch mapping, SVC/mem kill)
         run: make test-arm-sandbox-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
+  resilience-demo:
+    name: M8 resilience demo - malicious plugin killed, audio keeps running (x10)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Resilience demo on QEMU virt (good keeps playing; crash+evil killed 10x, no leak)
+        run: make test-arm-resilience-qemu CROSS_COMPILE=aarch64-linux-gnu-

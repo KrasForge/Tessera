@@ -161,25 +161,38 @@ int plugin_sandbox_regions(const plugin_t *pl, struct sandbox_region *out, int m
     return n;
 }
 
+/* Fill the trampoline param block (function VA + up to five 64-bit args) and
+ * run the plugin at EL0, returning the function's value (or -1 if it faulted
+ * and was killed). */
+static long call_fn(plugin_t *pl, uint64_t fn, uint64_t a0, uint64_t a1,
+                    uint64_t a2, uint64_t a3, uint64_t a4)
+{
+    volatile uint64_t *pb = (volatile uint64_t *)pl->param_pa;
+    pb[0] = fn;
+    pb[1] = a0;
+    pb[2] = a1;
+    pb[3] = a2;
+    pb[4] = a3;
+    pb[5] = a4;
+    return process_run(pl->proc, pl->entry_va, pl->stack_top, pl->param_va);
+}
+
 long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size)
 {
-    /* Param block layout shared with plugin_trampoline.S. */
-    *(volatile uint64_t *)(pl->param_pa + 0) = pl->init_va;
-    *(volatile uint32_t *)(pl->param_pa + 8) = sample_rate;
-    *(volatile uint32_t *)(pl->param_pa + 12) = block_size;
-
-    return process_run(pl->proc, pl->entry_va, pl->stack_top, pl->param_va);
+    return call_fn(pl, pl->init_va, sample_rate, block_size, 0, 0, 0);
 }
 
 long plugin_call_abi_version(plugin_t *pl)
 {
     if (!pl->abi_version_va)
         return -1;
-    /* Reuse the trampoline: call abi_version (it ignores the rate/size args)
-     * and exit with its return value. */
-    *(volatile uint64_t *)(pl->param_pa + 0) = pl->abi_version_va;
-    *(volatile uint32_t *)(pl->param_pa + 8) = 0;
-    *(volatile uint32_t *)(pl->param_pa + 12) = 0;
+    return call_fn(pl, pl->abi_version_va, 0, 0, 0, 0, 0);
+}
 
-    return process_run(pl->proc, pl->entry_va, pl->stack_top, pl->param_va);
+long plugin_call_block(plugin_t *pl, uint64_t in_l, uint64_t in_r,
+                       uint64_t out_l, uint64_t out_r, uint32_t n_frames)
+{
+    if (!pl->process_va)
+        return -1;
+    return call_fn(pl, pl->process_va, in_l, in_r, out_l, out_r, n_frames);
 }

@@ -72,6 +72,14 @@ long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size);
  * or the call faulted.  Used to validate the ABI before plugin_init runs. */
 long plugin_call_abi_version(plugin_t *pl);
 
+/* Run the plugin's plugin_process_block(in_l, in_r, out_l, out_r, n_frames) at
+ * EL0 through the trampoline.  The pointer arguments are VAs in the plugin's
+ * own address space (e.g. shared buffers mapped via plugin_map_region).
+ * Returns the function's value, or -1 if the plugin faulted and was killed -
+ * so a crash inside process_block is contained, not fatal to the host. */
+long plugin_call_block(plugin_t *pl, uint64_t in_l, uint64_t in_r,
+                       uint64_t out_l, uint64_t out_r, uint32_t n_frames);
+
 /* Map an existing physical region [pa, pa+bytes) into the plugin's address
  * space at `va` with `flags` (VMM_*).  Used to share the audio ring buffer
  * (issue #25) into the plugin at a fixed VA without copying.  Returns 0 on
