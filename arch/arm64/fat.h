@@ -18,8 +18,13 @@
 /* Read the 512-byte sector at `lba` into `buf`.  Returns 0 on success. */
 typedef int (*fat_read_block_fn)(void *ctx, uint32_t lba, uint8_t *buf);
 
+/* Write the 512-byte sector at `lba` from `buf`.  Returns 0 on success.
+ * Optional: set via fat_set_writer() to enable fat_write_file/fat_rename. */
+typedef int (*fat_write_block_fn)(void *ctx, uint32_t lba, const uint8_t *buf);
+
 typedef struct {
-    fat_read_block_fn read;
+    fat_read_block_fn  read;
+    fat_write_block_fn write;     /* NULL unless fat_set_writer() called */
     void    *ctx;
     uint16_t bytes_per_sec;
     uint8_t  sec_per_clus;
@@ -41,5 +46,25 @@ int fat_mount(fat_fs_t *fs, fat_read_block_fn read, void *ctx);
  * into `buf` (capacity `max`).  Returns the file size, or a negative value if
  * the file is missing or does not fit. */
 long fat_read_file(fat_fs_t *fs, const char *name, uint8_t *buf, uint32_t max);
+
+/* Enable writing by supplying a block-write callback (issue #40). */
+void fat_set_writer(fat_fs_t *fs, fat_write_block_fn write);
+
+/* Create or overwrite the root-directory file `name` with `len` bytes from
+ * `buf`.  Allocates a fresh cluster chain, updates the FAT and directory entry,
+ * and frees any previous chain.  Returns `len`, or a negative value on error
+ * (no writer, out of space, directory full). */
+long fat_write_file(fat_fs_t *fs, const char *name, const uint8_t *buf, uint32_t len);
+
+/* Rename `from` to `to` in the root directory, replacing any existing `to`
+ * (freeing its chain).  Used for atomic save.  Returns 0 or a negative error. */
+int fat_rename(fat_fs_t *fs, const char *from, const char *to);
+
+/* Errors. */
+#define FAT_OK        0
+#define FAT_ENOWRITER (-10)
+#define FAT_ENOSPACE  (-11)
+#define FAT_ENOENT    (-12)
+#define FAT_EIO       (-13)
 
 #endif /* ARM64_FAT_H */

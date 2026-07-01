@@ -21,11 +21,13 @@
 #include "param_queue.h"
 #include "graph_control.h"
 #include "vfs.h"
+#include "patch.h"
 #include <stdint.h>
 #include <stddef.h>
 
 #define PM_MAX_PLUGINS 16
 #define PM_PARAM_CAP   16u           /* parameter-queue depth (events) */
+#define PM_SLOT_PARAMS 16            /* params remembered per plugin for save */
 
 /* User VA at which each plugin's parameter queue is mapped (see ring_contract). */
 #ifndef PARAM_Q_VA
@@ -37,6 +39,9 @@ typedef struct {
     uint32_t      pid;
     plugin_t      plugin;
     param_queue_t *pq;     /* kernel-visible alias of the param queue */
+    char          path[PATCH_PATH_MAX];   /* source path, for patch save */
+    struct { uint32_t id; uint32_t bits; } params[PM_SLOT_PARAMS];
+    int           n_params;               /* remembered current param values */
 } pm_slot_t;
 
 typedef struct {
@@ -80,5 +85,23 @@ int pm_disconnect(plugin_mgr_t *m, uint32_t src_pid, uint32_t dst_pid);
 
 /* The loaded plugin for `pid` (for the harness to run it), or NULL. */
 plugin_t *pm_plugin(plugin_mgr_t *m, uint32_t pid);
+
+/* ---- patch / preset persistence (issue #40) ------------------------------ */
+
+/* Capture the live state (loaded plugins, wiring, remembered params) into `p`.
+ * Plugins are indexed in slot order; a "/dac" edge target becomes PATCH_DAC. */
+int pm_capture_patch(plugin_mgr_t *m, patch_t *p);
+
+/* Apply a parsed patch: load every plugin, restore its params, and reconnect
+ * the graph.  Returns PM_OK or a negative PM_E*. */
+int pm_apply_patch(plugin_mgr_t *m, const patch_t *p);
+
+/* sys_patch_save: serialise the live state and write it to `path` atomically
+ * (write a temp file, then rename over the target).  Returns PM_OK or negative. */
+long pm_patch_save(plugin_mgr_t *m, const char *path);
+
+/* sys_patch_load: read and parse the patch at `path`, then apply it.  Returns
+ * PM_OK, PM_ENOENT if missing, or PM_EBADELF for a corrupt/truncated patch. */
+long pm_patch_load(plugin_mgr_t *m, const char *path);
 
 #endif /* ARM64_PLUGIN_MGR_H */

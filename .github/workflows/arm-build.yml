@@ -485,3 +485,22 @@ jobs:
 
       - name: Guide's QEMU step - load the built plugin under Tessera
         run: make test-arm-sdk-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
+  patch-persistence:
+    name: M9 patches - format host test + save/reload identical audio on QEMU virt
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Patch-format host unit tests (serialize/parse/corrupt, ASan + UBSan)
+        run: make test-arm-patch
+
+      - name: Save a synth+effect graph, reboot, reload, identical audio on QEMU virt
+        run: make test-arm-patch-qemu CROSS_COMPILE=aarch64-linux-gnu-

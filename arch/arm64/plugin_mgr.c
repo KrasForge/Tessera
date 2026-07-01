@@ -126,6 +126,12 @@ long pm_load(plugin_mgr_t *m, const char *path)
     s->used = 1;
     s->pid  = s->plugin.proc->pid;
 
+    /* Remember the source path and reset the param record, for patch save. */
+    int k = 0;
+    for (; path[k] && k < PATCH_PATH_MAX - 1; k++) s->path[k] = path[k];
+    s->path[k] = '\0';
+    s->n_params = 0;
+
     if (m->gc)
         gc_add_plugin(m->gc, s->pid);
 
@@ -172,6 +178,18 @@ int pm_set_param(plugin_mgr_t *m, uint32_t pid, uint32_t param_id, uint32_t valu
     pm_slot_t *s = slot_by_pid(m, pid);
     if (!s)
         return PM_ENOENT;
+
+    /* Remember the latest value per param id so a patch save can serialise it
+     * (update in place if the id was set before, else append). */
+    int found = 0;
+    for (int i = 0; i < s->n_params; i++)
+        if (s->params[i].id == param_id) { s->params[i].bits = value_bits; found = 1; break; }
+    if (!found && s->n_params < PM_SLOT_PARAMS) {
+        s->params[s->n_params].id   = param_id;
+        s->params[s->n_params].bits = value_bits;
+        s->n_params++;
+    }
+
     return pq_push(s->pq, param_id, value_bits) ? PM_OK : PM_EFULL;
 }
 
@@ -193,4 +211,128 @@ plugin_t *pm_plugin(plugin_mgr_t *m, uint32_t pid)
 {
     pm_slot_t *s = slot_by_pid(m, pid);
     return s ? &s->plugin : (plugin_t *)0;
+}
+
+/* ---- patch / preset persistence (issue #40) ------------------------------ */
+
+/* Patch index (position among used slots) for a live PID, or -1. */
+static int patch_index_of_pid(plugin_mgr_t *m, uint32_t pid)
+{
+    int idx = 0;
+    for (int j = 0; j < PM_MAX_PLUGINS; j++) {
+        if (!m->slots[j].used) continue;
+        if (m->slots[j].pid == pid) return idx;
+        idx++;
+    }
+    return -1;
+}
+
+int pm_capture_patch(plugin_mgr_t *m, patch_t *p)
+{
+    patch_init(p);
+
+    /* Plugins, in slot order. */
+    for (int j = 0; j < PM_MAX_PLUGINS; j++)
+        if (m->slots[j].used)
+            if (patch_add_plugin(p, m->slots[j].path) < 0)
+                return PM_ENOMEM;
+
+    /* Remembered parameter values, per plugin. */
+    int idx = 0;
+    for (int j = 0; j < PM_MAX_PLUGINS; j++) {
+        if (!m->slots[j].used) continue;
+        for (int k = 0; k < m->slots[j].n_params; k++)
+            patch_add_param(p, idx, m->slots[j].params[k].id,
+                            m->slots[j].params[k].bits);
+        idx++;
+    }
+
+    /* Graph wiring (a "dac" target, pid 0, becomes PATCH_DAC). */
+    if (m->gc) {
+        for (int e = 0; e < GRAPH_MAX_EDGES; e++) {
+            if (!m->gc->graph.edges[e].used) continue;
+            uint32_t sp = m->gc->graph.nodes[m->gc->graph.edges[e].src].pid;
+            uint32_t dp = m->gc->graph.nodes[m->gc->graph.edges[e].dst].pid;
+            int si = patch_index_of_pid(m, sp);
+            int di = (dp == 0u) ? PATCH_DAC : patch_index_of_pid(m, dp);
+            if (si >= 0 && (di == PATCH_DAC || di >= 0))
+                patch_add_edge(p, si, di);
+        }
+    }
+    return PM_OK;
+}
+
+int pm_apply_patch(plugin_mgr_t *m, const patch_t *p)
+{
+    uint32_t pid_of[PATCH_MAX_PLUGINS];
+
+    for (int i = 0; i < p->n_plugins; i++) {
+        long pid = pm_load(m, p->plugins[i].path);
+        if (pid <= 0)
+            return (int)pid;                 /* propagate the load error */
+        pid_of[i] = (uint32_t)pid;
+    }
+
+    for (int i = 0; i < p->n_params; i++) {
+        int pl = p->params[i].plugin;
+        if (pl < 0 || pl >= p->n_plugins)
+            return PM_ENOENT;
+        pm_set_param(m, pid_of[pl], p->params[i].id, p->params[i].bits);
+    }
+
+    for (int i = 0; i < p->n_edges; i++) {
+        int si = p->edges[i].src, di = p->edges[i].dst;
+        if (si < 0 || si >= p->n_plugins) return PM_ENOENT;
+        if (di != PATCH_DAC && (di < 0 || di >= p->n_plugins)) return PM_ENOENT;
+        uint32_t sp = pid_of[si];
+        uint32_t dp = (di == PATCH_DAC) ? 0u : pid_of[di];
+        pm_connect(m, sp, dp);
+    }
+    return PM_OK;
+}
+
+/* Fixed temp path (in the target's backend) for atomic save. */
+static const char *pm_tmp_path(const char *path)
+{
+    if (path[0] == '/' && path[1] == 's' && path[2] == 'd' && path[3] == '/')
+        return "/sd/psave.tmp";
+    if (path[0] == '/' && path[1] == 'r' && path[2] == 'd' && path[3] == '/')
+        return "/rd/psave.tmp";
+    return "psave.tmp";
+}
+
+long pm_patch_save(plugin_mgr_t *m, const char *path)
+{
+    static char buf[VFS_STORE_CAP];
+    patch_t p;
+    pm_capture_patch(m, &p);
+
+    long n = patch_serialize(&p, buf, sizeof(buf));
+    if (n < 0)
+        return PM_ENOMEM;
+
+    /* Atomic: write a temp file, then rename it over the target, so a crash
+     * mid-write cannot corrupt the previous patch. */
+    const char *tmp = pm_tmp_path(path);
+    if (vfs_write(&m->vfs, tmp, (const uint8_t *)buf, (uint32_t)n) != VFS_OK)
+        return PM_ENOMEM;
+    if (vfs_rename(&m->vfs, tmp, path) != VFS_OK)
+        return PM_ENOMEM;
+    return PM_OK;
+}
+
+long pm_patch_load(plugin_mgr_t *m, const char *path)
+{
+    static uint8_t scratch[VFS_STORE_CAP];
+    const uint8_t *data = (const uint8_t *)0;
+
+    long n = vfs_resolve(&m->vfs, path, &data, scratch, sizeof(scratch));
+    if (n < 0 || !data)
+        return PM_ENOENT;
+
+    patch_t p;
+    if (patch_parse((const char *)data, (uint32_t)n, &p) != PATCH_OK)
+        return PM_EBADELF;                   /* corrupt / truncated */
+
+    return pm_apply_patch(m, &p);
 }

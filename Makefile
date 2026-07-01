@@ -1869,7 +1869,7 @@ VIRT_CTL_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
                 $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
                 $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
                 $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
-                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c $(ARCH_ARM_DIR)/vfs.c \
                 $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/string.c
 
 test-arm-control-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plugin_echo.elf \
@@ -1896,7 +1896,7 @@ test-arm-control-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf $(ARM_BUILD_DIR)/plugin_
 	    $(ARM_BUILD_DIR)/ct_elf64.o $(ARM_BUILD_DIR)/ct_plugin_loader.o \
 	    $(ARM_BUILD_DIR)/ct_audio_ringbuf.o $(ARM_BUILD_DIR)/ct_audio_graph.o \
 	    $(ARM_BUILD_DIR)/ct_graph_control.o $(ARM_BUILD_DIR)/ct_param_queue.o \
-	    $(ARM_BUILD_DIR)/ct_plugin_mgr.o $(ARM_BUILD_DIR)/ct_vfs.o \
+	    $(ARM_BUILD_DIR)/ct_plugin_mgr.o $(ARM_BUILD_DIR)/ct_patch.o $(ARM_BUILD_DIR)/ct_vfs.o \
 	    $(ARM_BUILD_DIR)/ct_fat.o $(ARM_BUILD_DIR)/ct_string.o
 	rm -f $(ARM_BUILD_DIR)/virt_control.log
 	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
@@ -1918,7 +1918,7 @@ VIRT_SD_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
                $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
                $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
                $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
-               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c $(ARCH_ARM_DIR)/vfs.c \
                $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/string.c
 
 test-arm-sd-load-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf \
@@ -1946,7 +1946,7 @@ test-arm-sd-load-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf \
 	    $(ARM_BUILD_DIR)/sd_elf64.o $(ARM_BUILD_DIR)/sd_plugin_loader.o \
 	    $(ARM_BUILD_DIR)/sd_audio_ringbuf.o $(ARM_BUILD_DIR)/sd_audio_graph.o \
 	    $(ARM_BUILD_DIR)/sd_graph_control.o $(ARM_BUILD_DIR)/sd_param_queue.o \
-	    $(ARM_BUILD_DIR)/sd_plugin_mgr.o $(ARM_BUILD_DIR)/sd_vfs.o \
+	    $(ARM_BUILD_DIR)/sd_plugin_mgr.o $(ARM_BUILD_DIR)/sd_patch.o $(ARM_BUILD_DIR)/sd_vfs.o \
 	    $(ARM_BUILD_DIR)/sd_fat.o $(ARM_BUILD_DIR)/sd_string.o
 	rm -f $(ARM_BUILD_DIR)/virt_sd.log
 	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
@@ -1968,7 +1968,7 @@ VIRT_SB_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
                $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
                $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
                $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
-               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c $(ARCH_ARM_DIR)/vfs.c \
                $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/sandbox.c \
                $(ARCH_ARM_DIR)/string.c
 
@@ -1997,7 +1997,7 @@ test-arm-sandbox-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf \
 	    $(ARM_BUILD_DIR)/sb_elf64.o $(ARM_BUILD_DIR)/sb_plugin_loader.o \
 	    $(ARM_BUILD_DIR)/sb_audio_ringbuf.o $(ARM_BUILD_DIR)/sb_audio_graph.o \
 	    $(ARM_BUILD_DIR)/sb_graph_control.o $(ARM_BUILD_DIR)/sb_param_queue.o \
-	    $(ARM_BUILD_DIR)/sb_plugin_mgr.o $(ARM_BUILD_DIR)/sb_vfs.o \
+	    $(ARM_BUILD_DIR)/sb_plugin_mgr.o $(ARM_BUILD_DIR)/sb_patch.o $(ARM_BUILD_DIR)/sb_vfs.o \
 	    $(ARM_BUILD_DIR)/sb_fat.o $(ARM_BUILD_DIR)/sb_sandbox.o \
 	    $(ARM_BUILD_DIR)/sb_string.o
 	rm -f $(ARM_BUILD_DIR)/virt_sandbox.log
@@ -2020,7 +2020,7 @@ VIRT_RES_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
                 $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
                 $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
                 $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
-                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c $(ARCH_ARM_DIR)/vfs.c \
                 $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/sandbox.c \
                 $(ARCH_ARM_DIR)/string.c
 
@@ -2049,7 +2049,7 @@ test-arm-resilience-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 	    $(ARM_BUILD_DIR)/rs_elf64.o $(ARM_BUILD_DIR)/rs_plugin_loader.o \
 	    $(ARM_BUILD_DIR)/rs_audio_ringbuf.o $(ARM_BUILD_DIR)/rs_audio_graph.o \
 	    $(ARM_BUILD_DIR)/rs_graph_control.o $(ARM_BUILD_DIR)/rs_param_queue.o \
-	    $(ARM_BUILD_DIR)/rs_plugin_mgr.o $(ARM_BUILD_DIR)/rs_vfs.o \
+	    $(ARM_BUILD_DIR)/rs_plugin_mgr.o $(ARM_BUILD_DIR)/rs_patch.o $(ARM_BUILD_DIR)/rs_vfs.o \
 	    $(ARM_BUILD_DIR)/rs_fat.o $(ARM_BUILD_DIR)/rs_sandbox.o \
 	    $(ARM_BUILD_DIR)/rs_string.o
 	rm -f $(ARM_BUILD_DIR)/virt_resilience.log
@@ -2073,7 +2073,7 @@ VIRT_SDK_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
                 $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
                 $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
                 $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
-                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c $(ARCH_ARM_DIR)/vfs.c \
                 $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/sandbox.c \
                 $(ARCH_ARM_DIR)/string.c
 
@@ -2105,7 +2105,7 @@ test-arm-sdk-qemu: sdk-example
 	    $(ARM_BUILD_DIR)/sk_elf64.o $(ARM_BUILD_DIR)/sk_plugin_loader.o \
 	    $(ARM_BUILD_DIR)/sk_audio_ringbuf.o $(ARM_BUILD_DIR)/sk_audio_graph.o \
 	    $(ARM_BUILD_DIR)/sk_graph_control.o $(ARM_BUILD_DIR)/sk_param_queue.o \
-	    $(ARM_BUILD_DIR)/sk_plugin_mgr.o $(ARM_BUILD_DIR)/sk_vfs.o \
+	    $(ARM_BUILD_DIR)/sk_plugin_mgr.o $(ARM_BUILD_DIR)/sk_patch.o $(ARM_BUILD_DIR)/sk_vfs.o \
 	    $(ARM_BUILD_DIR)/sk_fat.o $(ARM_BUILD_DIR)/sk_sandbox.o \
 	    $(ARM_BUILD_DIR)/sk_string.o
 	rm -f $(ARM_BUILD_DIR)/virt_sdk.log
@@ -2116,6 +2116,55 @@ test-arm-sdk-qemu: sdk-example
 	@grep -q "SDK: PASS" $(ARM_BUILD_DIR)/virt_sdk.log \
 	  && echo "QEMU virt SDK plugin test PASSED" \
 	  || { echo "QEMU virt SDK plugin test FAILED"; exit 1; }
+
+# M9 patch persistence on QEMU 'virt' (issue #40): save a synth+effect graph to
+# the FAT SD card, tear it down (reboot), reload, and confirm identical audio -
+# plus a corrupt patch rejected without panic.
+VIRT_PATCH_ELF  = $(ARM_BUILD_DIR)/virt_patch.elf
+VIRT_PATCH_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                  $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                  $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                  $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                  $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+                  $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+                  $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c \
+                  $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c \
+                  $(ARCH_ARM_DIR)/string.c
+
+test-arm-patch-qemu: sdk-example $(ARM_BUILD_DIR)/plugin_effect.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/pt_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/pt_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/pt_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/pt_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/patch_blob.S          -o $(ARM_BUILD_DIR)/pt_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/pt_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/patch_main.c -o $(ARM_BUILD_DIR)/pt_main.o
+	for s in $(VIRT_PATCH_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/pt_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_PATCH_ELF) \
+	    $(ARM_BUILD_DIR)/pt_start.o $(ARM_BUILD_DIR)/pt_main.o \
+	    $(ARM_BUILD_DIR)/pt_uart.o $(ARM_BUILD_DIR)/pt_vectors.o \
+	    $(ARM_BUILD_DIR)/pt_entry.o $(ARM_BUILD_DIR)/pt_tramp.o \
+	    $(ARM_BUILD_DIR)/pt_blob.o \
+	    $(ARM_BUILD_DIR)/pt_pmm.o $(ARM_BUILD_DIR)/pt_mmu.o \
+	    $(ARM_BUILD_DIR)/pt_vmem.o $(ARM_BUILD_DIR)/pt_process.o \
+	    $(ARM_BUILD_DIR)/pt_exceptions.o $(ARM_BUILD_DIR)/pt_syscalls.o \
+	    $(ARM_BUILD_DIR)/pt_elf64.o $(ARM_BUILD_DIR)/pt_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/pt_audio_ringbuf.o $(ARM_BUILD_DIR)/pt_audio_graph.o \
+	    $(ARM_BUILD_DIR)/pt_graph_control.o $(ARM_BUILD_DIR)/pt_param_queue.o \
+	    $(ARM_BUILD_DIR)/pt_plugin_mgr.o $(ARM_BUILD_DIR)/pt_patch.o \
+	    $(ARM_BUILD_DIR)/pt_vfs.o $(ARM_BUILD_DIR)/pt_fat.o \
+	    $(ARM_BUILD_DIR)/pt_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_patch.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_patch.log -net none \
+	    -kernel $(VIRT_PATCH_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_patch.log
+	@grep -q "PATCH: PASS" $(ARM_BUILD_DIR)/virt_patch.log \
+	  && echo "QEMU virt patch-persistence test PASSED" \
+	  || { echo "QEMU virt patch-persistence test FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
@@ -2259,3 +2308,11 @@ arm-install-cross:
 		qemu-system-arm
 
 .PHONY: arm arm-clean qemu-arm test-arm-m1 test-arm-m2 test-arm-exc test-arm-exc-qemu test-arm-user-qemu test-arm-fault-qemu test-arm-sched-qemu test-arm-i2s test-arm-i2s-qemu test-arm-audio test-arm-audio-qemu test-arm-sine test-arm-sine-qemu arm-install-deps arm-install-cross
+
+# ---- M9: patch/preset persistence (issue #40) -----------------------------
+# Host unit tests for the patch text format (serialize/parse/corrupt).
+ARM_PATCH_TEST_SRCS = tests/arm64/patch_test.c $(ARCH_ARM_DIR)/patch.c
+test-arm-patch: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_PATCH_TEST_SRCS) -o $(ARM_BUILD_DIR)/patch_test
+	$(ARM_BUILD_DIR)/patch_test

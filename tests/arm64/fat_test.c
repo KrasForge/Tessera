@@ -20,8 +20,8 @@ static int g_fail;
         else      { printf("  FAIL : %s\n", msg); g_fail++; }            \
     } while (0)
 
-/* 5 sectors: boot, FAT, root, data cluster 2, data cluster 3. */
-#define NSECT 5
+/* boot, FAT, root, then data clusters (extra clusters left free for writing). */
+#define NSECT 16
 static uint8_t g_img[NSECT * FAT_SECTOR];
 
 #define FILE_SIZE 600u           /* spans two 512-byte clusters */
@@ -66,6 +66,15 @@ static int read_block(void *ctx, uint32_t lba, uint8_t *buf)
     return 0;
 }
 
+static int write_block(void *ctx, uint32_t lba, const uint8_t *buf)
+{
+    (void)ctx;
+    if (lba >= NSECT)
+        return -1;
+    memcpy(g_img + lba * FAT_SECTOR, buf, FAT_SECTOR);
+    return 0;
+}
+
 int main(void)
 {
     printf("=== Tessera FAT16 reader tests (issue #34) ===\n");
@@ -75,7 +84,7 @@ int main(void)
     CHECK(fat_mount(&fs, read_block, 0) == 0, "mount the FAT16 volume");
     CHECK(fs.root_start == 2 && fs.data_start == 3, "geometry computed");
 
-    uint8_t out[FILE_SIZE + 64];
+    uint8_t out[1024];
     long n = fat_read_file(&fs, "pass.elf", out, sizeof(out));
     CHECK(n == (long)FILE_SIZE, "read the file (correct size, lower-case name)");
     int ok = 1;
@@ -85,6 +94,33 @@ int main(void)
 
     CHECK(fat_read_file(&fs, "nope.elf", out, sizeof(out)) < 0, "missing file rejected");
     CHECK(fat_read_file(&fs, "pass.elf", out, 100) < 0, "over-capacity read rejected");
+
+    /* ---- write support (issue #40) ---- */
+    CHECK(fat_write_file(&fs, "patch.txt", (const uint8_t *)"x", 1) == FAT_ENOWRITER,
+          "write without a writer is rejected");
+    fat_set_writer(&fs, write_block);
+
+    uint8_t big[700];
+    for (uint32_t i = 0; i < sizeof(big); i++) big[i] = (uint8_t)(i * 3 + 5);
+    CHECK(fat_write_file(&fs, "patch.txt", big, sizeof(big)) == (long)sizeof(big),
+          "write a new 700-byte file (spans two clusters)");
+    long rn = fat_read_file(&fs, "patch.txt", out, sizeof(out));
+    int rok = (rn == (long)sizeof(big));
+    for (uint32_t i = 0; i < sizeof(big); i++) if (out[i] != big[i]) rok = 0;
+    CHECK(rok, "read the written file back byte-for-byte");
+    /* The original file is untouched by the new allocation. */
+    CHECK(fat_read_file(&fs, "pass.elf", out, sizeof(out)) == (long)FILE_SIZE,
+          "pre-existing file still intact after writing another");
+
+    /* Overwrite with a shorter payload. */
+    CHECK(fat_write_file(&fs, "patch.txt", big, 100) == 100, "overwrite (shorter)");
+    CHECK(fat_read_file(&fs, "patch.txt", out, sizeof(out)) == 100, "overwritten size is 100");
+
+    /* Atomic-save primitive: write temp, then rename over the target. */
+    CHECK(fat_write_file(&fs, "patch.tmp", big, 300) == 300, "write temp file");
+    CHECK(fat_rename(&fs, "patch.tmp", "patch.txt") == FAT_OK, "rename temp -> target");
+    CHECK(fat_read_file(&fs, "patch.txt", out, sizeof(out)) == 300, "target now has temp's data");
+    CHECK(fat_read_file(&fs, "patch.tmp", out, sizeof(out)) < 0, "temp name gone after rename");
 
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;
