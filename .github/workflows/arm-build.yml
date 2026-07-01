@@ -206,6 +206,9 @@ jobs:
       - name: All example plugins build as AArch64 ELFs (make plugins, no imports)
         run: make plugins CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Reference plugins conform to the frozen Plugin ABI v1 (issue #37)
+        run: make verify-plugin-abi CROSS_COMPILE=aarch64-linux-gnu-
+
   plugin-loader-tests:
     name: M5 plugin loader - ELF reader host test + QEMU virt isolated load
     runs-on: ubuntu-22.04

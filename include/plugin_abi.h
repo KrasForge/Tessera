@@ -33,6 +33,19 @@
 #ifndef TESSERA_PLUGIN_ABI_H
 #define TESSERA_PLUGIN_ABI_H
 
+/* ===========================================================================
+ * STABILITY: this interface is FROZEN as Tessera Plugin ABI v1.0 (issue #37).
+ *
+ * The five exported symbols below, their signatures, the AAPCS64 calling
+ * convention, and the versioning rules are a stable contract: they will not
+ * change without a MAJOR version bump (TESSERA_PLUGIN_ABI_VERSION_MAJOR).
+ * Backward-compatible additions bump only the MINOR version.  The full,
+ * self-contained specification a third party needs to build a plugin lives in
+ * docs/plugin-abi.md; this header is its normative source.
+ * ========================================================================= */
+
+#define TESSERA_PLUGIN_ABI_STABLE 1   /* v1 frozen; see docs/plugin-abi.md */
+
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -46,6 +59,13 @@ extern "C" {
 #define TESSERA_PLUGIN_ABI_VERSION_MINOR 0u
 #define TESSERA_PLUGIN_ABI_VERSION \
     ((TESSERA_PLUGIN_ABI_VERSION_MAJOR << 16) | TESSERA_PLUGIN_ABI_VERSION_MINOR)
+
+/* Freeze guard: the v1 line is MAJOR 1.  A change here is an intentional,
+ * reviewed ABI break, not an accident. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(TESSERA_PLUGIN_ABI_VERSION_MAJOR == 1u,
+               "Tessera Plugin ABI v1 is frozen: bumping MAJOR is an ABI break");
+#endif
 
 /* Return codes for plugin_init(). */
 #define TESSERA_PLUGIN_OK        0

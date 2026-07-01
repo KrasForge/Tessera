@@ -1324,6 +1324,37 @@ test-arm-plugin-elf: | $(ARM_BUILD_DIR)
 	done
 	@echo "plugin ABI ELF test PASSED"
 
+# ---- M9: freeze + verify the plugin ABI v1 (issue #37) --------------------
+# Verify every in-tree reference plugin against the frozen ABI spec
+# (docs/plugin-abi.md): a little-endian AArch64 ELF that exports all five ABI
+# symbols and has NO undefined (imported) named symbols (self-contained).  The
+# deliberately-broken fixtures (badabi/badimport/sbsvc/sbmem/evil) are excluded.
+ABI_REF_PLUGINS = $(ARM_BUILD_DIR)/plugin_good.elf $(ARM_BUILD_DIR)/plugin_sine.elf \
+                  $(ARM_BUILD_DIR)/plugin_echo.elf $(ARM_BUILD_DIR)/plugin_effect.elf \
+                  $(ARM_BUILD_DIR)/plugin_effect_filter.elf $(ARM_BUILD_DIR)/plugin_pass.elf \
+                  $(ARM_BUILD_DIR)/plugin_producer.elf $(ARM_BUILD_DIR)/plugin_controller.elf
+
+verify-plugin-abi: $(ABI_REF_PLUGINS)
+	@echo "=== Verifying reference plugins against Plugin ABI v1 (issue #37) ==="
+	@fail=0; for elf in $(ABI_REF_PLUGINS); do \
+	  echo "--- $$elf"; \
+	  $(CROSS_COMPILE)readelf -h $$elf | grep -q 'AArch64' \
+	    || { echo "  FAIL: not an AArch64 ELF"; fail=1; continue; }; \
+	  $(CROSS_COMPILE)readelf -h $$elf | grep -qE 'EXEC|DYN' \
+	    || { echo "  FAIL: not ET_EXEC/ET_DYN"; fail=1; }; \
+	  for s in $(PLUGIN_SYMS); do \
+	    $(CROSS_COMPILE)readelf -sW $$elf | grep -q " $$s$$" \
+	      || { echo "  FAIL: missing ABI symbol $$s"; fail=1; }; \
+	  done; \
+	  u=$$($(CROSS_COMPILE)readelf -sW $$elf | awk '$$7=="UND" && $$8!=""' | wc -l); \
+	  [ "$$u" -eq 0 ] \
+	    && echo "  ok: AArch64, all 5 ABI symbols, 0 disallowed imports" \
+	    || { echo "  FAIL: $$u disallowed import(s)"; fail=1; }; \
+	done; \
+	[ $$fail -eq 0 ] \
+	  && echo "=== ALL REFERENCE PLUGINS CONFORM TO ABI v1 ===" \
+	  || { echo "=== ABI CONFORMANCE FAILURES PRESENT ==="; exit 1; }
+
 # ---- M8: SD/FAT plugin loading (issue #34) --------------------------------
 # Host unit tests for the FAT16 reader.
 ARM_FAT_TEST_SRCS = tests/arm64/fat_test.c $(ARCH_ARM_DIR)/fat.c
