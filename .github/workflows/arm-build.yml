@@ -441,3 +441,28 @@ jobs:
 
       - name: Resilience demo on QEMU virt (good keeps playing; crash+evil killed 10x, no leak)
         run: make test-arm-resilience-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
+  sdk-tests:
+    name: M9 plugin SDK - lib host test + build example from SDK + run on QEMU virt
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: SDK bundled ABI header is in sync with the canonical header
+        run: make verify-sdk-abi-sync
+
+      - name: SDK library host unit tests (sinf/clampf/param-queue, ASan + UBSan)
+        run: make test-sdk
+
+      - name: Build the example plugin using ONLY the SDK
+        run: make -C sdk/examples/sine_plugin CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: SDK plugin loads, audits clean, and produces audio on QEMU virt
+        run: make test-arm-sdk-qemu CROSS_COMPILE=aarch64-linux-gnu-
