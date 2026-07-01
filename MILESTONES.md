@@ -110,7 +110,7 @@ same board.
 
 ## Planned
 
-### M11 - multi-core plugin scheduling
+### M11 - multi-core plugin scheduling (#74-#76)
 
 The audio core owns CPU0; today the rest of the graph shares it. CPU1-3 are
 idle capacity. Schedule graph nodes across the secondary cores with
@@ -121,7 +121,7 @@ produced), keeping CPU0's cadence untouched.
 without overruns when spread across CPU1-3, and killing a plugin on any core
 disturbs neither the audio cadence nor plugins on other cores.
 
-### M12 - per-plugin CPU budget enforcement
+### M12 - per-plugin CPU budget enforcement (#77-#79)
 
 The sandbox contains memory (MMU) and syscalls (SVC gate), but a plugin that
 spins forever in `process_block` still starves the graph - the watchdog only
@@ -134,7 +134,7 @@ completes the untrusted-plugin story.
 `crash` and `evil` in the resilience demo and is detected and killed within a
 bounded number of blocks while the good plugin never misses one.
 
-### M13 - interactive control shell
+### M13 - interactive control shell (#80-#82)
 
 Today the control plane is C code calling syscalls (#30) and patch files
 (#40). Provide a serial shell over UART: `load` / `unload` / `wire` /
@@ -145,7 +145,7 @@ and `stats` for the latency counters.
 from plugins on the SD card, tweak parameters live, save it, reboot, and
 reload it - without compiling any C.
 
-### M14 - audio input
+### M14 - audio input (#83-#85)
 
 Output-only limits Tessera to synthesis. Add I2S capture (codec or ADC such
 as a PCM1808), an input node type in the graph, and an end-to-end
