@@ -1789,6 +1789,22 @@ $(ARM_BUILD_DIR)/plugin_sbmem.elf: plugins/example_sbmem/sbmem.c $(PLUGIN_LD) | 
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/sbmem.o
 	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/sbmem.o
 
+# M8 resilience-demo plugins (issue #36): a clean sine, a null-deref crasher,
+# and an actively malicious plugin.  good pulls in the sine generator; both
+# hostile plugins are self-contained.
+$(ARM_BUILD_DIR)/plugin_good.elf: plugins/test/good_plugin.c audio/sine_gen.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c plugins/test/good_plugin.c -o $(ARM_BUILD_DIR)/good_plugin.o
+	$(ARM_CC) $(PLUGIN_CFLAGS) -ffunction-sections -fdata-sections -Iinclude -c audio/sine_gen.c -o $(ARM_BUILD_DIR)/sine_gen_good.o
+	$(ARM_LD) -T $(PLUGIN_LD) --gc-sections -o $@ $(ARM_BUILD_DIR)/good_plugin.o $(ARM_BUILD_DIR)/sine_gen_good.o
+
+$(ARM_BUILD_DIR)/plugin_crash.elf: plugins/test/crash_plugin.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/crash_plugin.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/crash_plugin.o
+
+$(ARM_BUILD_DIR)/plugin_evil2.elf: plugins/test/evil_plugin.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/evil_plugin.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/evil_plugin.o
+
 # Full control-syscall test on QEMU 'virt' (MMU on): leak-free load/unload,
 # parameter delivery, and all five syscalls callable from EL0.
 VIRT_CTL_ELF  = $(ARM_BUILD_DIR)/virt_control.elf
@@ -1937,6 +1953,58 @@ test-arm-sandbox-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf \
 	@grep -q "SANDBOX: PASS" $(ARM_BUILD_DIR)/virt_sandbox.log \
 	  && echo "QEMU virt sandbox test PASSED" \
 	  || { echo "QEMU virt sandbox test FAILED"; exit 1; }
+
+# M8 capstone resilience demo on QEMU 'virt' (issue #36): load good/crash/evil
+# plugins into isolated sandboxes, run the graph, kill the two hostile plugins
+# mid-stream and confirm the good plugin + DAC keep producing audio, repeated
+# 10x with no leak.  This is the milestone's "done when" demo.
+VIRT_RES_ELF  = $(ARM_BUILD_DIR)/virt_resilience.elf
+VIRT_RES_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+                $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/vfs.c \
+                $(ARCH_ARM_DIR)/fat.c $(ARCH_ARM_DIR)/sandbox.c \
+                $(ARCH_ARM_DIR)/string.c
+
+test-arm-resilience-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
+                          $(ARM_BUILD_DIR)/plugin_crash.elf \
+                          $(ARM_BUILD_DIR)/plugin_evil2.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/rs_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/rs_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/rs_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/rs_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/resilience_blob.S      -o $(ARM_BUILD_DIR)/rs_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/rs_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/resilience_main.c -o $(ARM_BUILD_DIR)/rs_main.o
+	for s in $(VIRT_RES_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/rs_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_RES_ELF) \
+	    $(ARM_BUILD_DIR)/rs_start.o $(ARM_BUILD_DIR)/rs_main.o \
+	    $(ARM_BUILD_DIR)/rs_uart.o $(ARM_BUILD_DIR)/rs_vectors.o \
+	    $(ARM_BUILD_DIR)/rs_entry.o $(ARM_BUILD_DIR)/rs_tramp.o \
+	    $(ARM_BUILD_DIR)/rs_blob.o \
+	    $(ARM_BUILD_DIR)/rs_pmm.o $(ARM_BUILD_DIR)/rs_mmu.o \
+	    $(ARM_BUILD_DIR)/rs_vmem.o $(ARM_BUILD_DIR)/rs_process.o \
+	    $(ARM_BUILD_DIR)/rs_exceptions.o $(ARM_BUILD_DIR)/rs_syscalls.o \
+	    $(ARM_BUILD_DIR)/rs_elf64.o $(ARM_BUILD_DIR)/rs_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/rs_audio_ringbuf.o $(ARM_BUILD_DIR)/rs_audio_graph.o \
+	    $(ARM_BUILD_DIR)/rs_graph_control.o $(ARM_BUILD_DIR)/rs_param_queue.o \
+	    $(ARM_BUILD_DIR)/rs_plugin_mgr.o $(ARM_BUILD_DIR)/rs_vfs.o \
+	    $(ARM_BUILD_DIR)/rs_fat.o $(ARM_BUILD_DIR)/rs_sandbox.o \
+	    $(ARM_BUILD_DIR)/rs_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_resilience.log
+	-timeout 30 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_resilience.log -net none \
+	    -kernel $(VIRT_RES_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_resilience.log
+	@grep -q "RESILIENCE: PASS" $(ARM_BUILD_DIR)/virt_resilience.log \
+	  && echo "QEMU virt resilience demo PASSED" \
+	  || { echo "QEMU virt resilience demo FAILED"; exit 1; }
 
 # Full-stack preemption test on QEMU 'virt' (issue #20): MMU + process stack
 # AND the GICv2 + 1 kHz generic timer, running four EL0 busy loops that can
