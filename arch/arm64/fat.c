@@ -26,8 +26,9 @@ static void to_83(const char *name, char out[11])
 
 int fat_mount(fat_fs_t *fs, fat_read_block_fn read, void *ctx)
 {
-    fs->read = read;
-    fs->ctx  = ctx;
+    fs->read  = read;
+    fs->write = (fat_write_block_fn)0;
+    fs->ctx   = ctx;
 
     uint8_t bs[FAT_SECTOR];
     if (read(ctx, 0, bs) != 0)
@@ -117,4 +118,201 @@ long fat_read_file(fat_fs_t *fs, const char *name, uint8_t *buf, uint32_t max)
         clus = fat_next(fs, clus);
     }
     return (long)copied;
+}
+
+/* ---- write support (Issue #40) ------------------------------------------- */
+
+static void wr16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void wr32(uint8_t *p, uint32_t v)
+{ p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+
+void fat_set_writer(fat_fs_t *fs, fat_write_block_fn write) { fs->write = write; }
+
+/* Number of FAT16 entries the FAT can address. */
+static uint32_t fat_max_clusters(fat_fs_t *fs)
+{
+    return (uint32_t)fs->sec_per_fat * FAT_SECTOR / 2u;
+}
+
+/* Read a FAT16 entry. */
+static uint16_t fat_get(fat_fs_t *fs, uint16_t clus)
+{
+    uint32_t off = (uint32_t)clus * 2u;
+    uint8_t b[FAT_SECTOR];
+    if (fs->read(fs->ctx, fs->fat_start + off / FAT_SECTOR, b) != 0)
+        return 0xFFFF;
+    return rd16(b + off % FAT_SECTOR);
+}
+
+/* Write a FAT16 entry into every FAT copy. */
+static int fat_set(fat_fs_t *fs, uint16_t clus, uint16_t val)
+{
+    uint32_t off = (uint32_t)clus * 2u;
+    uint32_t sec = fs->fat_start + off / FAT_SECTOR;
+    uint8_t b[FAT_SECTOR];
+    if (fs->read(fs->ctx, sec, b) != 0)
+        return -1;
+    wr16(b + off % FAT_SECTOR, val);
+    for (uint32_t f = 0; f < fs->num_fats; f++)
+        if (fs->write(fs->ctx, sec + f * fs->sec_per_fat, b) != 0)
+            return -1;
+    return 0;
+}
+
+static void fat_free_chain(fat_fs_t *fs, uint16_t first)
+{
+    uint16_t c = first;
+    while (c >= 2 && c < 0xFFF8) {
+        uint16_t nxt = fat_get(fs, c);
+        fat_set(fs, c, 0);
+        c = nxt;
+    }
+}
+
+/* Allocate a chain of `nclus` free clusters; return the first via *first_out. */
+static int fat_alloc_chain(fat_fs_t *fs, uint32_t nclus, uint16_t *first_out)
+{
+    uint32_t maxc = fat_max_clusters(fs);
+    uint16_t prev = 0, first = 0;
+    uint32_t got = 0;
+    for (uint16_t c = 2; c < maxc && got < nclus; c++) {
+        if (fat_get(fs, c) != 0)
+            continue;
+        if (fat_set(fs, c, 0xFFFF) != 0) return -1;   /* tentative EOF */
+        if (prev) { if (fat_set(fs, prev, c) != 0) return -1; }
+        else      { first = c; }
+        prev = c;
+        got++;
+    }
+    if (got < nclus) { if (first) fat_free_chain(fs, first); return -1; }
+    *first_out = first;
+    return 0;
+}
+
+/* Find the root-dir entry for name83, or the first free slot.  Sets *found. */
+static int fat_dir_find(fat_fs_t *fs, const char want[11],
+                        uint32_t *sec_out, uint32_t *off_out, int *found)
+{
+    int free_sec = -1, free_off = -1;
+    *found = 0;
+    for (uint32_t s = 0; s < fs->root_sectors; s++) {
+        uint8_t d[FAT_SECTOR];
+        if (fs->read(fs->ctx, fs->root_start + s, d) != 0)
+            return -1;
+        for (uint32_t e = 0; e < FAT_SECTOR; e += 32) {
+            uint8_t c0 = d[e];
+            if (c0 == 0x00 || c0 == 0xE5) {
+                if (free_sec < 0) { free_sec = (int)(fs->root_start + s); free_off = (int)e; }
+                continue;
+            }
+            if ((d[e + 11] & 0x0F) == 0x0F)
+                continue;                            /* LFN */
+            int match = 1;
+            for (int i = 0; i < 11; i++)
+                if (d[e + i] != (uint8_t)want[i]) { match = 0; break; }
+            if (match) { *sec_out = fs->root_start + s; *off_out = e; *found = 1; return 0; }
+        }
+    }
+    if (free_sec < 0)
+        return -1;                                   /* directory full */
+    *sec_out = (uint32_t)free_sec;
+    *off_out = (uint32_t)free_off;
+    return 0;
+}
+
+static void fat_write_dirent(uint8_t *ent, const char want[11],
+                             uint16_t first, uint32_t size)
+{
+    for (int i = 0; i < 11; i++) ent[i] = (uint8_t)want[i];
+    ent[0x0B] = 0x20;                                /* archive attribute */
+    for (int i = 0x0C; i < 0x1A; i++) ent[i] = 0;
+    wr16(ent + 0x1A, first);
+    wr32(ent + 0x1C, size);
+}
+
+long fat_write_file(fat_fs_t *fs, const char *name, const uint8_t *buf, uint32_t len)
+{
+    if (!fs->write)
+        return FAT_ENOWRITER;
+
+    char want[11];
+    to_83(name, want);
+
+    uint32_t clus_bytes = (uint32_t)fs->sec_per_clus * FAT_SECTOR;
+    uint32_t nclus = (len + clus_bytes - 1) / clus_bytes;
+    if (nclus == 0) nclus = 1;
+
+    uint32_t dsec, doff; int found;
+    if (fat_dir_find(fs, want, &dsec, &doff, &found) != 0)
+        return FAT_ENOSPACE;
+
+    if (found) {
+        uint8_t d[FAT_SECTOR];
+        if (fs->read(fs->ctx, dsec, d) != 0) return FAT_EIO;
+        fat_free_chain(fs, rd16(d + doff + 0x1A));
+    }
+
+    uint16_t first;
+    if (fat_alloc_chain(fs, nclus, &first) != 0)
+        return FAT_ENOSPACE;
+
+    uint16_t c = first;
+    uint32_t copied = 0;
+    while (c >= 2 && c < 0xFFF8 && copied < len) {
+        uint32_t base = fs->data_start + (uint32_t)(c - 2) * fs->sec_per_clus;
+        for (uint32_t s = 0; s < fs->sec_per_clus && copied < len; s++) {
+            uint8_t sec[FAT_SECTOR];
+            for (int i = 0; i < FAT_SECTOR; i++) sec[i] = 0;
+            uint32_t n = len - copied;
+            if (n > FAT_SECTOR) n = FAT_SECTOR;
+            for (uint32_t i = 0; i < n; i++) sec[i] = buf[copied + i];
+            if (fs->write(fs->ctx, base + s, sec) != 0) return FAT_EIO;
+            copied += n;
+        }
+        c = fat_get(fs, c);
+    }
+
+    uint8_t d[FAT_SECTOR];
+    if (fs->read(fs->ctx, dsec, d) != 0) return FAT_EIO;
+    fat_write_dirent(d + doff, want, first, len);
+    if (fs->write(fs->ctx, dsec, d) != 0) return FAT_EIO;
+    return (long)len;
+}
+
+int fat_rename(fat_fs_t *fs, const char *from, const char *to)
+{
+    if (!fs->write)
+        return FAT_ENOWRITER;
+
+    char wf[11], wt[11];
+    to_83(from, wf);
+    to_83(to, wt);
+
+    uint32_t fsec, foff; int ffound;
+    if (fat_dir_find(fs, wf, &fsec, &foff, &ffound) != 0 || !ffound)
+        return FAT_ENOENT;
+    uint8_t df[FAT_SECTOR];
+    if (fs->read(fs->ctx, fsec, df) != 0) return FAT_EIO;
+    uint16_t first = rd16(df + foff + 0x1A);
+    uint32_t size  = rd32(df + foff + 0x1C);
+
+    uint32_t tsec, toff; int tfound;
+    if (fat_dir_find(fs, wt, &tsec, &toff, &tfound) != 0)
+        return FAT_ENOSPACE;
+    if (tfound) {
+        uint8_t dt[FAT_SECTOR];
+        if (fs->read(fs->ctx, tsec, dt) != 0) return FAT_EIO;
+        fat_free_chain(fs, rd16(dt + toff + 0x1A));
+    }
+
+    uint8_t dt[FAT_SECTOR];
+    if (fs->read(fs->ctx, tsec, dt) != 0) return FAT_EIO;
+    fat_write_dirent(dt + toff, wt, first, size);
+    if (fs->write(fs->ctx, tsec, dt) != 0) return FAT_EIO;
+
+    /* Re-read the source sector (it may equal the target sector) and delete. */
+    if (fs->read(fs->ctx, fsec, df) != 0) return FAT_EIO;
+    df[foff] = 0xE5;
+    if (fs->write(fs->ctx, fsec, df) != 0) return FAT_EIO;
+    return FAT_OK;
 }

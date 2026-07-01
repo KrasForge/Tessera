@@ -29,6 +29,9 @@ struct trapframe;
 #define SYS_PLUGIN_UNLOAD    8  /* (pid)  -> 0 or negative error                */
 #define SYS_PLUGIN_SET_PARAM 9  /* (pid, param_id, value_bits) -> 0 or negative */
 
+#define SYS_PATCH_SAVE      10  /* (path) -> 0 or negative error (issue #40) */
+#define SYS_PATCH_LOAD      11  /* (path) -> 0 or negative error             */
+
 /* Control-plane handlers; weak defaults in syscalls.c return -1, the graph
  * control plane / plugin manager provide the strong versions. */
 long sys_graph_connect(uint32_t src_pid, uint32_t dst_pid);
@@ -37,6 +40,8 @@ long sys_graph_list(void);
 long sys_plugin_load(const char *path);
 long sys_plugin_unload(uint32_t pid);
 long sys_plugin_set_param(uint32_t pid, uint32_t param_id, uint32_t value_bits);
+long sys_patch_save(const char *path);
+long sys_patch_load(const char *path);
 
 /* Drop to EL0 and run a process until it exits (or faults).
  *

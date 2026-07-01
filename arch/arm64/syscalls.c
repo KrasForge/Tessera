@@ -44,6 +44,8 @@ __attribute__((weak)) long sys_plugin_load(const char *p)               { (void)
 __attribute__((weak)) long sys_plugin_unload(uint32_t pid)              { (void)pid; return -1; }
 __attribute__((weak)) long sys_plugin_set_param(uint32_t pid, uint32_t id, uint32_t b)
                                                                         { (void)pid; (void)id; (void)b; return -1; }
+__attribute__((weak)) long sys_patch_save(const char *p)                { (void)p; return -1; }
+__attribute__((weak)) long sys_patch_load(const char *p)                { (void)p; return -1; }
 
 void arm64_handle_svc(struct trapframe *tf)
 {
@@ -114,6 +116,13 @@ void arm64_handle_svc(struct trapframe *tf)
         tf->x[0] = (uint64_t)sys_plugin_set_param((uint32_t)tf->x[0],
                                                   (uint32_t)tf->x[1],
                                                   (uint32_t)tf->x[2]);
+        break;
+
+    case SYS_PATCH_SAVE:
+        tf->x[0] = (uint64_t)sys_patch_save((const char *)(uintptr_t)tf->x[0]);
+        break;
+    case SYS_PATCH_LOAD:
+        tf->x[0] = (uint64_t)sys_patch_load((const char *)(uintptr_t)tf->x[0]);
         break;
 
     default:
