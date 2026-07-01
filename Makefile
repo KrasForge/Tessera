@@ -1385,6 +1385,13 @@ test-sdk: verify-sdk-abi-sync | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_SDK_TEST_SRCS) -o $(ARM_BUILD_DIR)/sdk_test -lm
 	$(ARM_BUILD_DIR)/sdk_test
 
+# Run the getting-started guide's build-and-verify steps verbatim (issue #39):
+# the single script that docs/getting-started.md quotes, so the guide is proven
+# on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.
+.PHONY: test-getting-started
+test-getting-started:
+	CROSS_COMPILE=$(CROSS_COMPILE) sh scripts/build-example-plugin.sh
+
 # The SDK bundles a copy of the frozen ABI header so it is standalone; guard it
 # against drift from the canonical include/plugin_abi.h (issue #38).
 .PHONY: verify-sdk-abi-sync
