@@ -1,0 +1,38 @@
+# Makefile.template - copy this next to your plugin source to cross-compile a
+# Tessera plugin (Issue #38).  Point SDK at the SDK directory, set PLUGIN to
+# your source, and run `make`.  Requires only an aarch64 bare-metal GCC.
+#
+#   make                              # build $(PLUGIN).elf
+#   make CROSS_COMPILE=aarch64-linux-gnu-   # use a different toolchain triple
+#
+# The output ELF is a self-contained AArch64 plugin: copy it to the SD card and
+# load it with sys_plugin_load("/sd/<name>.elf").
+
+# ---- configure me ----------------------------------------------------------
+PLUGIN ?= my_plugin          # basename of your <PLUGIN>.c source
+SDK    ?= ..                 # path to the sdk/ directory
+
+# ---- toolchain -------------------------------------------------------------
+CROSS_COMPILE ?= aarch64-none-elf-
+CC = $(CROSS_COMPILE)gcc
+LD = $(CROSS_COMPILE)ld
+
+# Plugin ABI build flags: freestanding, position-independent, no libc.
+CFLAGS = -mcpu=cortex-a72 -ffreestanding -fPIC -O2 -std=c11 -Wall -Wextra -I$(SDK)
+LDSCRIPT = $(SDK)/tessera.ld
+
+.PHONY: all clean
+all: $(PLUGIN).elf
+
+# Build (or reuse) the SDK static library.
+$(SDK)/libtessera.a:
+	$(MAKE) -C $(SDK) CROSS_COMPILE=$(CROSS_COMPILE)
+
+$(PLUGIN).o: $(PLUGIN).c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(PLUGIN).elf: $(PLUGIN).o $(SDK)/libtessera.a
+	$(LD) -T $(LDSCRIPT) -o $@ $(PLUGIN).o $(SDK)/libtessera.a
+
+clean:
+	rm -f $(PLUGIN).o $(PLUGIN).elf
