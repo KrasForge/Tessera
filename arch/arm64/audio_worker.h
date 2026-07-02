@@ -43,18 +43,29 @@
 
 #define AW_MAX_NODES 16          /* mirrors GRAPH_MAX_NODES (audio_graph.h) */
 
-/* One unit of per-block work: a plugin node's process callback. */
+/* One unit of per-block work: a plugin node's process callback.
+ *
+ * When the worker has a clock (issue #77), each run is timed and accumulated
+ * here: min / max / sum of the node's service time in counter cycles, since
+ * the node was assigned.  Assignment is also the moment a node's cost regime
+ * changes (fresh plugin, new core), so the accumulation window is "this
+ * node's lifetime on this worker" - reset by aw_assign, rendered as
+ * min/max/mean in the latency-stats style by plugin_time.c. */
 typedef struct {
     void   (*run)(void *ctx);
     void    *ctx;
+    uint32_t tag;                /* attribution id (plugin pid); 0 = none   */
     uint64_t runs;               /* blocks this node actually executed      */
     uint64_t overruns;           /* blocks missed because its worker was late */
+    uint64_t svc_min;            /* fastest run (cycles; ~0 until first run) */
+    uint64_t svc_max;            /* slowest run (cycles)                    */
+    uint64_t svc_sum;            /* total run time (cycles)                 */
 } aw_node_t;
 
 /* One worker, pinned to one secondary core.  The two sequence counters are
  * kept on separate cache lines: CPU0 writes `block_seq`, the worker writes
  * `done_seq`, and neither should steal the other's line per block. */
-typedef struct {
+typedef struct audio_worker_s {
     /* ---- audio-core side (written by CPU0) ---- */
     volatile uint64_t block_seq __attribute__((aligned(64)));
     uint64_t          kicks;     /* kick attempts (published or skipped)     */
@@ -70,6 +81,13 @@ typedef struct {
     volatile uint32_t n_nodes __attribute__((aligned(64)));
     aw_node_t         nodes[AW_MAX_NODES];
     uint32_t          cpu_id;    /* core this worker is pinned to            */
+
+    /* ---- per-node time accounting (issue #77; both optional) ---- */
+    uint64_t        (*clock)(void);  /* CNTPCT reader; NULL = accounting off */
+    void            (*publish)(struct audio_worker_s *w, void *ctx);
+    void             *pub_ctx;   /* fired after each completed block, on the
+                                  * worker core - plugin_time.c's seqlock
+                                  * board publisher hangs here               */
 } audio_worker_t;
 
 /* Reset a worker to empty/idle, pinned to `cpu_id`. */

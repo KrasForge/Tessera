@@ -168,6 +168,8 @@ static void test_stage_apply(void)
     CHECK(graph_sched_apply(&s, w, fns, reset_cb, 0) == 1, "initial apply");
     CHECK(s.generation == 1, "generation bumped");
     CHECK(w[0].n_nodes == 2 && w[1].n_nodes == 0, "both nodes on worker 0");
+    CHECK(w[0].nodes[0].tag == 10 && w[0].nodes[1].tag == 11,
+          "nodes tagged with their plugin pids (issue #77)");
     CHECK(reset_seen(&g_ringmem[1], 1), "DAC edge reset+primed (pipelined)");
     CHECK(reset_seen(&g_ringmem[0], 0), "same-core edge reset unprimed");
     CHECK(g_n_resets == 2, "no other edge touched");
