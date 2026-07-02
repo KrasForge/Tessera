@@ -2089,6 +2089,62 @@ test-arm-resilience-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 	  && echo "QEMU virt resilience demo PASSED" \
 	  || { echo "QEMU virt resilience demo FAILED"; exit 1; }
 
+# M11 capacity + resilience on QEMU 'virt' (issue #76): the milestone's "done
+# when".  Phase 1 proves six calibrated-cost nodes (~1.5 blocks of work)
+# overrun a single worker; phase 2 proves the same nodes spread across
+# CPU1-3 run clean; then repeated load/distribute/kill/unload cycles run the
+# M8 good+crash EL0 plugins per block on the CPU1 worker (secondaries join
+# the kernel MMU via mmu_join) with the expensive nodes as background load:
+# crash faults ON THE WORKER CORE and is killed with the M8 fault banner,
+# good produces audio on every worker block, CPU0 never overruns, and the
+# frame allocator returns to baseline.  MMU on, four cores.
+VIRT_MC_ELF  = $(ARM_BUILD_DIR)/virt_multicore.elf
+VIRT_MC_SRCS = $(VIRT_RES_SRCS) $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
+               $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/audio_worker.c \
+               $(ARCH_ARM_DIR)/irq.c $(ARCH_ARM_DIR)/timer.c drivers/gic.c
+
+test-arm-multicore-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
+                         $(ARM_BUILD_DIR)/plugin_crash.elf \
+                         $(ARM_BUILD_DIR)/plugin_evil2.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/mc_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S       -o $(ARM_BUILD_DIR)/mc_smpentry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/mc_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/mc_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/mc_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/resilience_blob.S      -o $(ARM_BUILD_DIR)/mc_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/mc_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/multicore_main.c -o $(ARM_BUILD_DIR)/mc_main.o
+	for s in $(VIRT_MC_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/mc_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_MC_ELF) \
+	    $(ARM_BUILD_DIR)/mc_start.o $(ARM_BUILD_DIR)/mc_main.o \
+	    $(ARM_BUILD_DIR)/mc_uart.o $(ARM_BUILD_DIR)/mc_vectors.o \
+	    $(ARM_BUILD_DIR)/mc_entry.o $(ARM_BUILD_DIR)/mc_tramp.o \
+	    $(ARM_BUILD_DIR)/mc_blob.o $(ARM_BUILD_DIR)/mc_smpentry.o \
+	    $(ARM_BUILD_DIR)/mc_pmm.o $(ARM_BUILD_DIR)/mc_mmu.o \
+	    $(ARM_BUILD_DIR)/mc_vmem.o $(ARM_BUILD_DIR)/mc_process.o \
+	    $(ARM_BUILD_DIR)/mc_exceptions.o $(ARM_BUILD_DIR)/mc_syscalls.o \
+	    $(ARM_BUILD_DIR)/mc_elf64.o $(ARM_BUILD_DIR)/mc_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/mc_audio_ringbuf.o $(ARM_BUILD_DIR)/mc_audio_graph.o \
+	    $(ARM_BUILD_DIR)/mc_graph_control.o $(ARM_BUILD_DIR)/mc_param_queue.o \
+	    $(ARM_BUILD_DIR)/mc_plugin_mgr.o $(ARM_BUILD_DIR)/mc_patch.o $(ARM_BUILD_DIR)/mc_vfs.o \
+	    $(ARM_BUILD_DIR)/mc_fat.o $(ARM_BUILD_DIR)/mc_sandbox.o \
+	    $(ARM_BUILD_DIR)/mc_string.o \
+	    $(ARM_BUILD_DIR)/mc_smp.o $(ARM_BUILD_DIR)/mc_spsc_ring.o \
+	    $(ARM_BUILD_DIR)/mc_audio_core.o $(ARM_BUILD_DIR)/mc_audio_worker.o \
+	    $(ARM_BUILD_DIR)/mc_irq.o $(ARM_BUILD_DIR)/mc_timer.o \
+	    $(ARM_BUILD_DIR)/mc_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_multicore.log
+	-timeout 90 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_multicore.log -net none \
+	    -kernel $(VIRT_MC_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_multicore.log
+	@grep -q "MULTICORE: PASS" $(ARM_BUILD_DIR)/virt_multicore.log \
+	  && echo "QEMU virt multi-core capacity+resilience test PASSED" \
+	  || { echo "QEMU virt multi-core capacity+resilience test FAILED"; exit 1; }
+
 # M9 SDK acceptance on QEMU 'virt' (issue #38): build the example plugin with
 # ONLY the published SDK (its own Makefile, no kernel headers), then load that
 # ELF and prove it audits clean, produces audio, and responds to a parameter

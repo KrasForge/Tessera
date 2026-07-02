@@ -36,6 +36,15 @@ smp_secondary_entry:
     msr     sctlr_el1, x0
     isb
 
+    /* Match the boot core's trap configuration (start_virt.S): FP/SIMD
+     * access on (CPACR_EL1.FPEN = 0b11).  A core that runs EL0 plugins
+     * (issue #76) must not trap their first FP instruction - without the
+     * lazy-FPU handler linked, that trap would retry forever. */
+    mrs     x0, cpacr_el1
+    orr     x0, x0, #(3 << 20)
+    msr     cpacr_el1, x0
+    isb
+
     /* Install this core's stack: g_smp_stack[mpidr_aff0]. */
     mrs     x0, mpidr_el1
     and     x0, x0, #0xFF

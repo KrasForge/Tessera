@@ -178,6 +178,16 @@ void mmu_init(void)
     mmu_enable();
 }
 
+/* Bring a secondary core into the kernel address space (issue #76): replay
+ * the enable sequence against the tables mmu_init() built on the boot core.
+ * Must run on the joining core itself - PSCI hands secondaries over with the
+ * MMU and caches off (smp_entry.S) - before that core touches any state the
+ * other cores access through their caches. */
+void mmu_join(void)
+{
+    mmu_enable();
+}
+
 uint64_t *mmu_kernel_pgd(void)
 {
     return g_kernel_pgd;
