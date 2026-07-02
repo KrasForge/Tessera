@@ -1330,6 +1330,19 @@ test-arm-ptime: | $(ARM_BUILD_DIR)
 	      $(ARM_PTIME_TEST_SRCS) -o $(ARM_PTIME_TEST_BIN) -lpthread
 	$(ARM_PTIME_TEST_BIN)
 
+# Host unit tests for the CPU-budget policy (issue #78): the mute/kill
+# escalation truth table, forgiveness on a clean block, the fair-share
+# default, and the control-plane budget registry.  Pure C, ASan/UBSan.
+ARM_BUDGET_TEST_SRCS = tests/arm64/budget_test.c $(ARCH_ARM_DIR)/budget.c \
+                       $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/audio_graph.c
+ARM_BUDGET_TEST_BIN  = $(ARM_BUILD_DIR)/budget_test
+
+test-arm-budget: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_BUDGET_TEST_SRCS) -o $(ARM_BUDGET_TEST_BIN)
+	$(ARM_BUDGET_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -1902,6 +1915,15 @@ $(ARM_BUILD_DIR)/plugin_evil2.elf: plugins/test/evil_plugin.c $(PLUGIN_LD) | $(A
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/evil_plugin.o
 	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/evil_plugin.o
 
+# Issue #78 (M12) demo plugins: a permanent CPU hog and a transient one.
+$(ARM_BUILD_DIR)/plugin_hog.elf: plugins/test/hog_plugin.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/hog_plugin.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/hog_plugin.o
+
+$(ARM_BUILD_DIR)/plugin_blip.elf: plugins/test/blip_plugin.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/blip_plugin.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/blip_plugin.o
+
 # Full control-syscall test on QEMU 'virt' (MMU on): leak-free load/unload,
 # parameter delivery, and all five syscalls callable from EL0.
 VIRT_CTL_ELF  = $(ARM_BUILD_DIR)/virt_control.elf
@@ -2158,6 +2180,65 @@ test-arm-multicore-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 	@grep -q "MULTICORE: PASS" $(ARM_BUILD_DIR)/virt_multicore.log \
 	  && echo "QEMU virt multi-core capacity+resilience test PASSED" \
 	  || { echo "QEMU virt multi-core capacity+resilience test FAILED"; exit 1; }
+
+# CPU-budget enforcement on QEMU 'virt' (issue #78): three EL0 plugins run
+# per block on the CPU1 worker, each under a budget - good never trips it,
+# blip spins forever on two consecutive blocks, hog spins forever on every
+# block.  The worker core's banked generic timer preempts a spinning plugin
+# at its budget boundary (mid-block, verified by measured preempted run
+# times); the policy mutes first and kills after 3 consecutive offences
+# ([budget] banners); blip is forgiven and audibly returns; CPU0 never
+# misses a callback; unloading everything (including the killed hog)
+# returns the frame allocator to baseline.  MMU on, two cores.
+VIRT_BUDGET_ELF  = $(ARM_BUILD_DIR)/virt_budget.elf
+VIRT_BUDGET_SRCS = $(VIRT_RES_SRCS) $(ARCH_ARM_DIR)/budget.c \
+                   $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
+                   $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/audio_worker.c \
+                   $(ARCH_ARM_DIR)/latency.c \
+                   $(ARCH_ARM_DIR)/irq.c $(ARCH_ARM_DIR)/timer.c drivers/gic.c
+
+test-arm-budget-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
+                      $(ARM_BUILD_DIR)/plugin_blip.elf \
+                      $(ARM_BUILD_DIR)/plugin_hog.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/bg_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S       -o $(ARM_BUILD_DIR)/bg_smpentry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/bg_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/bg_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/bg_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/budget_blob.S          -o $(ARM_BUILD_DIR)/bg_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/bg_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/budget_main.c -o $(ARM_BUILD_DIR)/bg_main.o
+	for s in $(VIRT_BUDGET_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/bg_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_BUDGET_ELF) \
+	    $(ARM_BUILD_DIR)/bg_start.o $(ARM_BUILD_DIR)/bg_main.o \
+	    $(ARM_BUILD_DIR)/bg_uart.o $(ARM_BUILD_DIR)/bg_vectors.o \
+	    $(ARM_BUILD_DIR)/bg_entry.o $(ARM_BUILD_DIR)/bg_tramp.o \
+	    $(ARM_BUILD_DIR)/bg_blob.o $(ARM_BUILD_DIR)/bg_smpentry.o \
+	    $(ARM_BUILD_DIR)/bg_pmm.o $(ARM_BUILD_DIR)/bg_mmu.o \
+	    $(ARM_BUILD_DIR)/bg_vmem.o $(ARM_BUILD_DIR)/bg_process.o \
+	    $(ARM_BUILD_DIR)/bg_exceptions.o $(ARM_BUILD_DIR)/bg_syscalls.o \
+	    $(ARM_BUILD_DIR)/bg_elf64.o $(ARM_BUILD_DIR)/bg_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/bg_audio_ringbuf.o $(ARM_BUILD_DIR)/bg_audio_graph.o \
+	    $(ARM_BUILD_DIR)/bg_graph_control.o $(ARM_BUILD_DIR)/bg_param_queue.o \
+	    $(ARM_BUILD_DIR)/bg_plugin_mgr.o $(ARM_BUILD_DIR)/bg_patch.o $(ARM_BUILD_DIR)/bg_vfs.o \
+	    $(ARM_BUILD_DIR)/bg_fat.o $(ARM_BUILD_DIR)/bg_sandbox.o \
+	    $(ARM_BUILD_DIR)/bg_string.o $(ARM_BUILD_DIR)/bg_budget.o \
+	    $(ARM_BUILD_DIR)/bg_smp.o $(ARM_BUILD_DIR)/bg_spsc_ring.o \
+	    $(ARM_BUILD_DIR)/bg_audio_core.o $(ARM_BUILD_DIR)/bg_audio_worker.o \
+	    $(ARM_BUILD_DIR)/bg_latency.o \
+	    $(ARM_BUILD_DIR)/bg_irq.o $(ARM_BUILD_DIR)/bg_timer.o \
+	    $(ARM_BUILD_DIR)/bg_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_budget.log
+	-timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 2 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_budget.log -net none \
+	    -kernel $(VIRT_BUDGET_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_budget.log
+	@grep -q "BUDGET: PASS" $(ARM_BUILD_DIR)/virt_budget.log \
+	  && echo "QEMU virt budget-enforcement test PASSED" \
+	  || { echo "QEMU virt budget-enforcement test FAILED"; exit 1; }
 
 # M9 SDK acceptance on QEMU 'virt' (issue #38): build the example plugin with
 # ONLY the published SDK (its own Makefile, no kernel headers), then load that

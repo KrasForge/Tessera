@@ -23,6 +23,18 @@ __attribute__((weak)) void audio_dma_irq(void) { }
  * GIC+timer test) still link. */
 __attribute__((weak)) void scheduler_tick(struct trapframe *tf) { (void)tf; }
 
+/* Budget-preemption hook (arch/arm64/budget.c, issue #78).  The generic
+ * timer's PPI is banked per core: on CPU0 it is the audio cadence, on a
+ * worker core that armed a budget it is a plugin's budget boundary.  The
+ * strong version returns 1 when it consumed the IRQ (and, when the core was
+ * at EL0, does not return at all - it EOIs and unwinds the plugin).  Weak
+ * no-op so every existing harness links unchanged. */
+__attribute__((weak)) int budget_timer_irq(struct trapframe *tf, uint32_t iar)
+{
+    (void)tf; (void)iar;
+    return 0;
+}
+
 void arm64_irq(struct trapframe *tf)
 {
     uint32_t iar = gic_ack();
@@ -32,8 +44,10 @@ void arm64_irq(struct trapframe *tf)
         return;                 /* spurious: no handler, no EOI */
 
     if (id == TIMER_IRQ) {
-        timer_tick();           /* reload + count                          */
-        scheduler_tick(tf);     /* may preempt: swaps the on-stack frame    */
+        if (!budget_timer_irq(tf, iar)) {
+            timer_tick();       /* reload + count                          */
+            scheduler_tick(tf); /* may preempt: swaps the on-stack frame    */
+        }
     } else if (id == DMA_AUDIO_IRQ) {
         audio_dma_irq();
     }

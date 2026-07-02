@@ -34,6 +34,7 @@ void aw_init(audio_worker_t *w, uint32_t cpu_id)
         w->nodes[i].tag      = 0;
         w->nodes[i].runs     = 0;
         w->nodes[i].overruns = 0;
+        w->nodes[i].offences = 0;
         w->nodes[i].svc_min  = ~0ull;
         w->nodes[i].svc_max  = 0;
         w->nodes[i].svc_sum  = 0;
@@ -50,6 +51,7 @@ int aw_assign(audio_worker_t *w, void (*run)(void *ctx), void *ctx)
     w->nodes[n].tag      = 0;
     w->nodes[n].runs     = 0;
     w->nodes[n].overruns = 0;
+    w->nodes[n].offences = 0;
     w->nodes[n].svc_min  = ~0ull;    /* until the first timed run */
     w->nodes[n].svc_max  = 0;
     w->nodes[n].svc_sum  = 0;

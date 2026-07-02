@@ -209,6 +209,12 @@ jobs:
       - name: Per-plugin time reporting on QEMU virt (calibrated nodes + reporter)
         run: make test-arm-ptime-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Budget-policy host unit tests (escalation + registry, ASan + UBSan)
+        run: make test-arm-budget
+
+      - name: Budget enforcement on QEMU virt (preempt at boundary, mute, kill)
+        run: make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   latency-tests:
     name: M4 latency - audio jitter stats host tests + QEMU virt reporting
     runs-on: ubuntu-22.04

@@ -26,6 +26,16 @@ void gic_init(void)
     GICC_CTLR = 1;        /* enable this CPU's interface      */
 }
 
+/* Per-core CPU-interface bring-up for a secondary (issue #78): the GICC
+ * registers are banked per core, so each core that takes interrupts - e.g.
+ * a worker core arming a plugin-budget timer - enables its own interface.
+ * The distributor is already up from gic_init() on the boot core. */
+void gic_cpu_init(void)
+{
+    GICC_PMR  = 0xF0;
+    GICC_CTLR = 1;
+}
+
 void gic_enable_irq(uint32_t irq)
 {
     GICD_ISENABLER(irq / 32) = 1u << (irq % 32);

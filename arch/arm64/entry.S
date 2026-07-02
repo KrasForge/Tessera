@@ -36,10 +36,14 @@ run_user:
     dsb     ish
     isb
 
-    /* Enter EL0: ELR = entry, SPSR = EL0t with DAIF masked, SP_EL0 = stack,
-     * and pass arg0 in the user's x0. */
+    /* Enter EL0: ELR = entry, SPSR = g_user_spsr (EL0t with DAIF masked by
+     * default; budget enforcement (issue #78) opens the IRQ bit so a plugin
+     * can be preempted at its budget boundary), SP_EL0 = stack, and pass
+     * arg0 in the user's x0. */
     msr     elr_el1, x0
-    mov     x10, #0x3C0
+    adrp    x10, g_user_spsr
+    add     x10, x10, :lo12:g_user_spsr
+    ldr     x10, [x10]
     msr     spsr_el1, x10
     msr     sp_el0, x1
     mov     x0, x3
@@ -67,3 +71,13 @@ kernel_resume:
     .global g_kresume
 g_kresume:
     .skip   112                 /* x19..x30 (12) + sp (1), padded to 16 */
+
+/* SPSR used for the EL0 entry.  0x3C0 = EL0t, DAIF masked (the default);
+ * budget_arm() (issue #78) switches to 0x340 (IRQ open) around a budgeted
+ * plugin call so its timer can preempt the plugin, and budget_disarm()
+ * restores the default. */
+    .section .data
+    .align  3
+    .global g_user_spsr
+g_user_spsr:
+    .quad   0x3C0

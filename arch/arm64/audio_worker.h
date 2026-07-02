@@ -57,6 +57,8 @@ typedef struct {
     uint32_t tag;                /* attribution id (plugin pid); 0 = none   */
     uint64_t runs;               /* blocks this node actually executed      */
     uint64_t overruns;           /* blocks missed because its worker was late */
+    uint64_t offences;           /* budget offences (issue #78; bumped by the
+                                  * host's enforcement wrapper)             */
     uint64_t svc_min;            /* fastest run (cycles; ~0 until first run) */
     uint64_t svc_max;            /* slowest run (cycles)                    */
     uint64_t svc_sum;            /* total run time (cycles)                 */

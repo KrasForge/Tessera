@@ -195,6 +195,31 @@ callback on the dedicated audio core. They **must** be real-time-safe:
 non-real-time work (allocation, table precomputation); they never run from the
 audio callback.
 
+### Host enforcement (M12, issue #78)
+
+The constraints above are not merely advisory: the host **enforces the time
+budget**. This is host policy layered on top of the frozen v1.0 ABI - nothing
+here changes the ABI, the exports, or their signatures.
+
+- Every plugin gets a **per-block CPU budget**: by default a fair share of the
+  block period across the plugins scheduled on its core, or a value set
+  explicitly through the control plane (`gc_set_budget`).
+- A plugin still inside `plugin_process_block` at its budget boundary is
+  **preempted mid-block** by the kernel's budget timer - it does not get to
+  finish the block, and the host emits **silence** downstream for that block
+  (an *offence*, visible as `offences=` in the `plugin_time:` stats line).
+- Offences escalate: a plugin that offends on **3 consecutive blocks is
+  killed** and unloaded, with a `[budget]` log line naming it and the measured
+  time. A clean block resets the streak - a plugin that recovers after a
+  transient overrun is forgiven (but its offence count remains visible).
+- A preempted plugin's block-local state may be inconsistent when it is next
+  entered (its stack is reset, statics persist). A plugin that cannot
+  tolerate this was already violating the no-unbounded-work rule.
+
+For plugin authors the message is unchanged: finish well within the block
+period. The enforcement exists so that a plugin which does not - by bug or by
+malice - costs one block of its own silence, not the graph's.
+
 ---
 
 ## 7. Versioning
