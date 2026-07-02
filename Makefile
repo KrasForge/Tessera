@@ -1356,6 +1356,21 @@ test-arm-shell: | $(ARM_BUILD_DIR)
 	      $(ARM_SHELL_TEST_SRCS) -o $(ARM_SHELL_TEST_BIN)
 	$(ARM_SHELL_TEST_BIN)
 
+# Host unit tests for the shell graph commands (issue #81): argument parsing,
+# the load/unload/wire/unwire/set-param verbs forwarding through a mock
+# backend, the one-line error paths, and ls/stats rendering.  Pure C,
+# ASan/UBSan.
+ARM_SHGRAPH_TEST_SRCS = tests/arm64/shell_graph_test.c \
+                        $(ARCH_ARM_DIR)/shell.c $(ARCH_ARM_DIR)/shell_graph.c \
+                        $(ARCH_ARM_DIR)/patch.c
+ARM_SHGRAPH_TEST_BIN  = $(ARM_BUILD_DIR)/shell_graph_test
+
+test-arm-shell-graph: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_SHGRAPH_TEST_SRCS) -o $(ARM_SHGRAPH_TEST_BIN)
+	$(ARM_SHGRAPH_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -2305,6 +2320,66 @@ test-arm-shell-qemu: | $(ARM_BUILD_DIR)
 	  && grep -q "unknown command: frobnicate" $(ARM_BUILD_DIR)/virt_shell.log \
 	  && echo "QEMU virt serial-shell test PASSED" \
 	  || { echo "QEMU virt serial-shell test FAILED"; exit 1; }
+
+# Building an audio graph from the serial console on QEMU 'virt' (issue #81):
+# MMU on, a single core reads a scripted console session over `-serial stdio`
+# and drives the shell graph commands, which wrap the real plugin manager and
+# graph control plane.  The script loads a sine generator and a gain stage,
+# wires synth -> filter -> DAC, tweaks a param, then `run` executes audio
+# blocks through the toposorted graph; the harness asserts the resulting
+# graph (two plugin nodes, two edges) and that real audio came out, then
+# powers off via PSCI so the log flushes.
+VIRT_SHGRAPH_ELF  = $(ARM_BUILD_DIR)/virt_shell_graph.elf
+VIRT_SHGRAPH_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                    $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                    $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                    $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                    $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+                    $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+                    $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c \
+                    $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c \
+                    $(ARCH_ARM_DIR)/sandbox.c $(ARCH_ARM_DIR)/string.c \
+                    $(ARCH_ARM_DIR)/shell.c $(ARCH_ARM_DIR)/shell_graph.c
+
+test-arm-shell-graph-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
+                           $(ARM_BUILD_DIR)/plugin_effect_filter.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/sg_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/sg_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/sg_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/sg_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/shell_graph_blob.S     -o $(ARM_BUILD_DIR)/sg_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/sg_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/shell_graph_main.c -o $(ARM_BUILD_DIR)/sg_main.o
+	for s in $(VIRT_SHGRAPH_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/sg_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_SHGRAPH_ELF) \
+	    $(ARM_BUILD_DIR)/sg_start.o $(ARM_BUILD_DIR)/sg_main.o \
+	    $(ARM_BUILD_DIR)/sg_uart.o $(ARM_BUILD_DIR)/sg_vectors.o \
+	    $(ARM_BUILD_DIR)/sg_entry.o $(ARM_BUILD_DIR)/sg_tramp.o \
+	    $(ARM_BUILD_DIR)/sg_blob.o \
+	    $(ARM_BUILD_DIR)/sg_pmm.o $(ARM_BUILD_DIR)/sg_mmu.o \
+	    $(ARM_BUILD_DIR)/sg_vmem.o $(ARM_BUILD_DIR)/sg_process.o \
+	    $(ARM_BUILD_DIR)/sg_exceptions.o $(ARM_BUILD_DIR)/sg_syscalls.o \
+	    $(ARM_BUILD_DIR)/sg_elf64.o $(ARM_BUILD_DIR)/sg_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/sg_audio_ringbuf.o $(ARM_BUILD_DIR)/sg_audio_graph.o \
+	    $(ARM_BUILD_DIR)/sg_graph_control.o $(ARM_BUILD_DIR)/sg_param_queue.o \
+	    $(ARM_BUILD_DIR)/sg_plugin_mgr.o $(ARM_BUILD_DIR)/sg_patch.o \
+	    $(ARM_BUILD_DIR)/sg_vfs.o $(ARM_BUILD_DIR)/sg_fat.o \
+	    $(ARM_BUILD_DIR)/sg_sandbox.o $(ARM_BUILD_DIR)/sg_string.o \
+	    $(ARM_BUILD_DIR)/sg_shell.o $(ARM_BUILD_DIR)/sg_shell_graph.o
+	rm -f $(ARM_BUILD_DIR)/virt_shell_graph.log
+	printf 'ls\rload /rd/synth\rload /rd/effect\rwire 1 2\rwire 2 dac\rset-param 1 0 660\rls\rrun 8\rstats\rdone\r' \
+	  | timeout 30 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 1 -m 256M \
+	    -display none -serial stdio -monitor none -net none \
+	    -kernel $(VIRT_SHGRAPH_ELF) > $(ARM_BUILD_DIR)/virt_shell_graph.log 2>&1 || true
+	@cat $(ARM_BUILD_DIR)/virt_shell_graph.log
+	@grep -q "SHELL-GRAPH: PASS" $(ARM_BUILD_DIR)/virt_shell_graph.log \
+	  && grep -q "loaded pid 1" $(ARM_BUILD_DIR)/virt_shell_graph.log \
+	  && grep -q "1 -> 2" $(ARM_BUILD_DIR)/virt_shell_graph.log \
+	  && echo "QEMU virt shell-graph test PASSED" \
+	  || { echo "QEMU virt shell-graph test FAILED"; exit 1; }
 
 # M9 SDK acceptance on QEMU 'virt' (issue #38): build the example plugin with
 # ONLY the published SDK (its own Makefile, no kernel headers), then load that

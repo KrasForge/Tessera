@@ -234,6 +234,12 @@ jobs:
       - name: Serial shell on QEMU virt (real UART RX + shared-wire reporter)
         run: make test-arm-shell-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Shell graph-command host unit tests (verbs + ls/stats, ASan + UBSan)
+        run: make test-arm-shell-graph
+
+      - name: Build a graph from the console on QEMU virt (synth -> filter -> DAC)
+        run: make test-arm-shell-graph-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   latency-tests:
     name: M4 latency - audio jitter stats host tests + QEMU virt reporting
     runs-on: ubuntu-22.04
