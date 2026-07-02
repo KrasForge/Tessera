@@ -7,16 +7,36 @@ void gc_init(graph_control_t *gc, const gc_ring_ops_t *ops)
     audio_graph_init(&gc->graph, (int (*)(uint32_t))0);
     gc->ops = *ops;
     gc->generation = 0;
+    gc->on_change = (void (*)(void *))0;
+    gc->on_change_ctx = (void *)0;
+}
+
+void gc_set_on_change(graph_control_t *gc, void (*fn)(void *ctx), void *ctx)
+{
+    gc->on_change_ctx = ctx;
+    gc->on_change = fn;
+}
+
+static void gc_changed(graph_control_t *gc)
+{
+    if (gc->on_change)
+        gc->on_change(gc->on_change_ctx);
 }
 
 int gc_add_plugin(graph_control_t *gc, uint32_t pid)
 {
-    return audio_graph_add_node(&gc->graph, pid);
+    int n = audio_graph_add_node(&gc->graph, pid);
+    if (n >= 0)
+        gc_changed(gc);
+    return n;
 }
 
 int gc_add_dac(graph_control_t *gc)
 {
-    return audio_graph_add_dac(&gc->graph);
+    int n = audio_graph_add_dac(&gc->graph);
+    if (n >= 0)
+        gc_changed(gc);
+    return n;
 }
 
 /* Seqlock write fences: bump to odd before mutating, to even after, with
@@ -57,6 +77,7 @@ int gc_connect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
         gc->ops.ring_map(gc->ops.ctx, dst_pid, ring, /*input=*/1);
     }
     gc_end(gc);
+    gc_changed(gc);
     return GC_OK;
 }
 
@@ -79,6 +100,7 @@ int gc_disconnect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
 
     if (gc->ops.ring_del && ring)
         gc->ops.ring_del(gc->ops.ctx, ring);
+    gc_changed(gc);
     return GC_OK;
 }
 
