@@ -162,6 +162,25 @@ jobs:
       - name: Dedicated audio-core SMP test on QEMU virt (4 cores via PSCI)
         run: make test-arm-smp-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  worker-tests:
+    name: M11 workers - per-core audio workers, kick/skip cadence contract
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Audio-worker host unit tests (kick/step protocol, ASan + UBSan)
+        run: make test-arm-worker
+
+      - name: Per-core audio workers on QEMU virt (stalled-worker containment)
+        run: make test-arm-worker-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   latency-tests:
     name: M4 latency - audio jitter stats host tests + QEMU virt reporting
     runs-on: ubuntu-22.04

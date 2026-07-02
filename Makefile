@@ -1288,6 +1288,19 @@ test-arm-graph-control: | $(ARM_BUILD_DIR)
 	      $(ARM_GCTL_TEST_SRCS) -o $(ARM_GCTL_TEST_BIN)
 	$(ARM_GCTL_TEST_BIN)
 
+# Host unit tests for the per-core audio workers (issue #74): the kick/step
+# cadence protocol, skip-and-attribute on a late worker, automatic recovery,
+# and the drained invariant blocks + overruns == kicks, including a real
+# two-thread kicker/worker stress.  Pure C, run under ASan/UBSan.
+ARM_WORKER_TEST_SRCS = tests/arm64/worker_test.c $(ARCH_ARM_DIR)/audio_worker.c
+ARM_WORKER_TEST_BIN  = $(ARM_BUILD_DIR)/worker_test
+
+test-arm-worker: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_WORKER_TEST_SRCS) -o $(ARM_WORKER_TEST_BIN) -lpthread
+	$(ARM_WORKER_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -2248,6 +2261,46 @@ test-arm-smp-qemu: | $(ARM_BUILD_DIR)
 	@grep -q "AUDIO-CORE: PASS" $(ARM_BUILD_DIR)/virt_smp.log \
 	  && echo "QEMU virt audio-core SMP test PASSED" \
 	  || { echo "QEMU virt audio-core SMP test FAILED"; exit 1; }
+
+# Per-core audio workers on QEMU 'virt' (issue #74): CPU0 kicks three pinned
+# workers each 1 kHz block and refills the DAC ring without ever blocking on
+# them; CPU1's worker node produces the audio, CPU2's worker runs two counter
+# nodes, CPU3's worker node hangs at a trigger block.  Verifies zero CPU0
+# overruns/underruns throughout, per-node overrun attribution on the stalled
+# worker, and the drained invariant on all three.  MMU off, four cores.
+VIRT_WORKER_ELF  = $(ARM_BUILD_DIR)/virt_worker.elf
+VIRT_WORKER_SRCS = $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
+                   $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/audio_worker.c \
+                   $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/irq.c \
+                   $(ARCH_ARM_DIR)/timer.c drivers/gic.c
+
+test-arm-worker-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/wk_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S -o $(ARM_BUILD_DIR)/wk_smpentry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S   -o $(ARM_BUILD_DIR)/wk_vectors.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/wk_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/worker_main.c -o $(ARM_BUILD_DIR)/wk_main.o
+	for s in $(VIRT_WORKER_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/wk_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_WORKER_ELF) \
+	    $(ARM_BUILD_DIR)/wk_start.o $(ARM_BUILD_DIR)/wk_smpentry.o \
+	    $(ARM_BUILD_DIR)/wk_main.o $(ARM_BUILD_DIR)/wk_uart.o \
+	    $(ARM_BUILD_DIR)/wk_vectors.o \
+	    $(ARM_BUILD_DIR)/wk_smp.o $(ARM_BUILD_DIR)/wk_spsc_ring.o \
+	    $(ARM_BUILD_DIR)/wk_audio_core.o $(ARM_BUILD_DIR)/wk_audio_worker.o \
+	    $(ARM_BUILD_DIR)/wk_exceptions.o \
+	    $(ARM_BUILD_DIR)/wk_irq.o $(ARM_BUILD_DIR)/wk_timer.o \
+	    $(ARM_BUILD_DIR)/wk_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_worker.log
+	-timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_worker.log -net none \
+	    -kernel $(VIRT_WORKER_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_worker.log
+	@grep -q "WORKER: PASS" $(ARM_BUILD_DIR)/virt_worker.log \
+	  && echo "QEMU virt audio-worker test PASSED" \
+	  || { echo "QEMU virt audio-worker test FAILED"; exit 1; }
 
 # Audio latency/jitter reporting test on QEMU 'virt' (issue #22): CPU0 measures
 # every callback (CNTPCT period + IRQ-to-thread wakeup) and publishes stats;
