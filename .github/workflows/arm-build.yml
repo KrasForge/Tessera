@@ -187,6 +187,9 @@ jobs:
       - name: Graph partitioning on QEMU virt (live rewire + cross-core split)
         run: make test-arm-gsched-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Multi-core capacity + resilience on QEMU virt (M11 done-when, issue 76)
+        run: make test-arm-multicore-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   latency-tests:
     name: M4 latency - audio jitter stats host tests + QEMU virt reporting
     runs-on: ubuntu-22.04

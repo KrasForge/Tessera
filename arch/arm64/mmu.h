@@ -41,6 +41,11 @@
  * data cache, and instruction cache.  pmm_init() must already have run. */
 void mmu_init(void);
 
+/* Bring a secondary core into the kernel address space (issue #76): replay
+ * the register-programming half of mmu_init() with the already-built tables.
+ * Must run on the joining core itself, after mmu_init() on the boot core. */
+void mmu_join(void);
+
 /* The kernel's L0 translation-table root (physical == virtual, identity). */
 uint64_t *mmu_kernel_pgd(void);
 
