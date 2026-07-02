@@ -15,6 +15,13 @@ void uart_putc(char c);
 /* Transmit a NUL-terminated string. */
 void uart_puts(const char *s);
 
+/* Receive one byte, blocking until one is available (polled RX FIFO). */
+char uart_getc(void);
+
+/* Non-blocking receive: returns the byte (0..255), or -1 if the RX FIFO is
+ * empty.  Used by the shell's input loop. */
+int uart_try_getc(void);
+
 /* Minimal printf — supports %s %c %d %u %x %X %%. */
 void uart_printf(const char *fmt, ...);
 

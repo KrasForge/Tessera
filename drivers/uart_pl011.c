@@ -32,6 +32,7 @@
 #define UARTICR     (*(volatile uint32_t *)(UART0_BASE + 0x044u))
 
 /* UARTFR flags */
+#define FR_RXFE     (1u << 4)   /* RX FIFO empty */
 #define FR_TXFF     (1u << 5)   /* TX FIFO full */
 #define FR_BUSY     (1u << 3)   /* UART transmitting */
 
@@ -93,6 +94,20 @@ void uart_puts(const char *s)
 {
     while (*s)
         uart_putc(*s++);
+}
+
+int uart_try_getc(void)
+{
+    if (UARTFR & FR_RXFE)
+        return -1;                          /* RX FIFO empty */
+    return (int)(UARTDR & 0xFFu);
+}
+
+char uart_getc(void)
+{
+    while (UARTFR & FR_RXFE)                 /* spin until a byte arrives */
+        ;
+    return (char)(UARTDR & 0xFFu);
 }
 
 /* ---- Minimal printf support -------------------------------------------- */

@@ -1343,6 +1343,19 @@ test-arm-budget: | $(ARM_BUILD_DIR)
 	      $(ARM_BUDGET_TEST_SRCS) -o $(ARM_BUDGET_TEST_BIN)
 	$(ARM_BUDGET_TEST_BIN)
 
+# Host unit tests for the serial shell core (issue #80): the tokeniser, the
+# command dispatcher and built-in help, the line editor (echo, backspace,
+# CR/LF/CRLF), over-long-line containment, and a 2M-byte fuzz sweep.  Pure C,
+# run under ASan/UBSan.
+ARM_SHELL_TEST_SRCS = tests/arm64/shell_test.c $(ARCH_ARM_DIR)/shell.c
+ARM_SHELL_TEST_BIN  = $(ARM_BUILD_DIR)/shell_test
+
+test-arm-shell: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_SHELL_TEST_SRCS) -o $(ARM_SHELL_TEST_BIN)
+	$(ARM_SHELL_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -2248,6 +2261,50 @@ test-arm-budget-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 	@grep -q "BUDGET: PASS" $(ARM_BUILD_DIR)/virt_budget.log \
 	  && echo "QEMU virt budget-enforcement test PASSED" \
 	  || { echo "QEMU virt budget-enforcement test FAILED"; exit 1; }
+
+# Serial control shell on QEMU 'virt' (issue #80): the shell runs on CPU1
+# reading a real PL011 RX FIFO fed over `-serial stdio`, while CPU0 services
+# the audio callback and CPU2 emits periodic `audio_latency:` lines through
+# the same UART lock.  A canned script (help / echo / stat / a backspace-
+# edited line / an error / an unknown command / done) drives it; the harness
+# verifies every path ran, the reporter shared the wire without corruption,
+# and CPU0 saw zero overruns, then powers off via PSCI so stdio is flushed.
+VIRT_SHELL_ELF  = $(ARM_BUILD_DIR)/virt_shell.elf
+VIRT_SHELL_SRCS = $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
+                  $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/shell.c \
+                  $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/irq.c \
+                  $(ARCH_ARM_DIR)/timer.c drivers/gic.c
+
+test-arm-shell-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/sh_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S -o $(ARM_BUILD_DIR)/sh_smpentry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S   -o $(ARM_BUILD_DIR)/sh_vectors.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/sh_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/shell_main.c -o $(ARM_BUILD_DIR)/sh_main.o
+	for s in $(VIRT_SHELL_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/sh_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_SHELL_ELF) \
+	    $(ARM_BUILD_DIR)/sh_start.o $(ARM_BUILD_DIR)/sh_smpentry.o \
+	    $(ARM_BUILD_DIR)/sh_main.o $(ARM_BUILD_DIR)/sh_uart.o \
+	    $(ARM_BUILD_DIR)/sh_vectors.o \
+	    $(ARM_BUILD_DIR)/sh_smp.o $(ARM_BUILD_DIR)/sh_spsc_ring.o \
+	    $(ARM_BUILD_DIR)/sh_audio_core.o $(ARM_BUILD_DIR)/sh_shell.o \
+	    $(ARM_BUILD_DIR)/sh_exceptions.o \
+	    $(ARM_BUILD_DIR)/sh_irq.o $(ARM_BUILD_DIR)/sh_timer.o \
+	    $(ARM_BUILD_DIR)/sh_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_shell.log
+	printf 'help\recho hello world\rstat\recho hel\bllo\rbad\rfrobnicate\rdone\r' \
+	  | timeout 30 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial stdio -monitor none -net none \
+	    -kernel $(VIRT_SHELL_ELF) > $(ARM_BUILD_DIR)/virt_shell.log 2>&1 || true
+	@cat $(ARM_BUILD_DIR)/virt_shell.log
+	@grep -q "SHELL: PASS" $(ARM_BUILD_DIR)/virt_shell.log \
+	  && grep -q "hello world" $(ARM_BUILD_DIR)/virt_shell.log \
+	  && grep -q "unknown command: frobnicate" $(ARM_BUILD_DIR)/virt_shell.log \
+	  && echo "QEMU virt serial-shell test PASSED" \
+	  || { echo "QEMU virt serial-shell test FAILED"; exit 1; }
 
 # M9 SDK acceptance on QEMU 'virt' (issue #38): build the example plugin with
 # ONLY the published SDK (its own Makefile, no kernel headers), then load that

@@ -215,6 +215,25 @@ jobs:
       - name: Budget enforcement on QEMU virt (preempt at boundary, mute, kill)
         run: make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+  control-shell-tests:
+    name: M13 control shell - serial shell core + interleaved reporter
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-toolchain and QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+
+      - name: Shell-core host unit tests (tokenise + dispatch + fuzz, ASan + UBSan)
+        run: make test-arm-shell
+
+      - name: Serial shell on QEMU virt (real UART RX + shared-wire reporter)
+        run: make test-arm-shell-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   latency-tests:
     name: M4 latency - audio jitter stats host tests + QEMU virt reporting
     runs-on: ubuntu-22.04
