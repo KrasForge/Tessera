@@ -1,5 +1,6 @@
-/* tests/arm64/virt/resilience_blob.S - embed the M8 demo plugins (Issue #36).
- * The Makefile builds these ELFs first. */
+/* tests/arm64/virt/resilience_blob.S - embed the resilience-demo plugins
+ * (Issue #36, M8; hog added by issue #79, M12).  The Makefile builds these
+ * ELFs first. */
 
     .section .rodata
     .balign 8
@@ -23,3 +24,10 @@ crash_elf_end:
 evil_elf_start:
     .incbin "build/arm/plugin_evil2.elf"
 evil_elf_end:
+
+    .balign 8
+    .global hog_elf_start
+    .global hog_elf_end
+hog_elf_start:
+    .incbin "build/arm/plugin_hog.elf"
+hog_elf_end:
