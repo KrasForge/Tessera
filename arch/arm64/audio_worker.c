@@ -25,11 +25,18 @@ void aw_init(audio_worker_t *w, uint32_t cpu_id)
     w->stop      = 0;
     w->n_nodes   = 0;
     w->cpu_id    = cpu_id;
+    w->clock     = 0;
+    w->publish   = 0;
+    w->pub_ctx   = 0;
     for (int i = 0; i < AW_MAX_NODES; i++) {
         w->nodes[i].run      = 0;
         w->nodes[i].ctx      = 0;
+        w->nodes[i].tag      = 0;
         w->nodes[i].runs     = 0;
         w->nodes[i].overruns = 0;
+        w->nodes[i].svc_min  = ~0ull;
+        w->nodes[i].svc_max  = 0;
+        w->nodes[i].svc_sum  = 0;
     }
 }
 
@@ -40,8 +47,12 @@ int aw_assign(audio_worker_t *w, void (*run)(void *ctx), void *ctx)
         return -1;
     w->nodes[n].run      = run;
     w->nodes[n].ctx      = ctx;
+    w->nodes[n].tag      = 0;
     w->nodes[n].runs     = 0;
     w->nodes[n].overruns = 0;
+    w->nodes[n].svc_min  = ~0ull;    /* until the first timed run */
+    w->nodes[n].svc_max  = 0;
+    w->nodes[n].svc_sum  = 0;
     /* Publish the entry before the count so a worker that sees the new count
      * sees a complete node. */
     __atomic_store_n(&w->n_nodes, n + 1, __ATOMIC_RELEASE);
@@ -81,11 +92,27 @@ int aw_worker_step(audio_worker_t *w)
         return 0;
 
     uint32_t n = __atomic_load_n(&w->n_nodes, __ATOMIC_ACQUIRE);
-    for (uint32_t i = 0; i < n; i++) {
-        w->nodes[i].run(w->nodes[i].ctx);
-        w->nodes[i].runs++;
+    if (w->clock) {
+        /* Per-node service-time accounting (issue #77): two counter reads
+         * and three additions per node, only when a clock is installed. */
+        for (uint32_t i = 0; i < n; i++) {
+            uint64_t t0 = w->clock();
+            w->nodes[i].run(w->nodes[i].ctx);
+            uint64_t dt = w->clock() - t0;
+            if (dt < w->nodes[i].svc_min) w->nodes[i].svc_min = dt;
+            if (dt > w->nodes[i].svc_max) w->nodes[i].svc_max = dt;
+            w->nodes[i].svc_sum += dt;
+            w->nodes[i].runs++;
+        }
+    } else {
+        for (uint32_t i = 0; i < n; i++) {
+            w->nodes[i].run(w->nodes[i].ctx);
+            w->nodes[i].runs++;
+        }
     }
     w->blocks++;
+    if (w->publish)                 /* stats out before the block is answered */
+        w->publish(w, w->pub_ctx);
     __atomic_store_n(&w->done_seq, seq, __ATOMIC_RELEASE);
     return 1;
 }

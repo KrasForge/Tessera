@@ -1316,6 +1316,20 @@ test-arm-gsched: | $(ARM_BUILD_DIR)
 	      $(ARM_GSCHED_TEST_SRCS) -o $(ARM_GSCHED_TEST_BIN)
 	$(ARM_GSCHED_TEST_BIN)
 
+# Host unit tests for per-plugin time accounting (issue #77): the worker-side
+# clock measurement, per-node min/max/mean vs hand-computed values, the
+# seqlocked stats board (incl. a two-thread publisher/reader stress), and the
+# plugin_time line rendering.  Pure C, run under ASan/UBSan.
+ARM_PTIME_TEST_SRCS = tests/arm64/plugin_time_test.c $(ARCH_ARM_DIR)/plugin_time.c \
+                      $(ARCH_ARM_DIR)/audio_worker.c $(ARCH_ARM_DIR)/latency.c
+ARM_PTIME_TEST_BIN  = $(ARM_BUILD_DIR)/plugin_time_test
+
+test-arm-ptime: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_PTIME_TEST_SRCS) -o $(ARM_PTIME_TEST_BIN) -lpthread
+	$(ARM_PTIME_TEST_BIN)
+
 # ---- M5: plugin ABI (issue #23) -------------------------------------------
 # Plugins use floating point for DSP, so they are built WITH FP (no
 # -mgeneral-regs-only) and against only the self-contained plugin ABI header.
@@ -2417,6 +2431,49 @@ test-arm-gsched-qemu: | $(ARM_BUILD_DIR)
 	@grep -q "GSCHED: PASS" $(ARM_BUILD_DIR)/virt_gsched.log \
 	  && echo "QEMU virt graph-partitioning test PASSED" \
 	  || { echo "QEMU virt graph-partitioning test FAILED"; exit 1; }
+
+# Per-plugin time accounting on QEMU 'virt' (issue #77): two workers with
+# clocks installed run tagged nodes of calibrated cost (light ~1/16 block,
+# heavy ~1/3 block) plus the DAC producer; a reporter on CPU3 snapshots each
+# worker's seqlocked stats board once per second and renders the
+# `plugin_time:` lines over UART.  Verifies the reported means match the
+# calibration, every snapshot is consistent, and the accounting/reporting
+# perturbs nothing (zero CPU0 overruns).  MMU off, four cores.
+VIRT_PTIME_ELF  = $(ARM_BUILD_DIR)/virt_ptime.elf
+VIRT_PTIME_SRCS = $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
+                  $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/audio_worker.c \
+                  $(ARCH_ARM_DIR)/plugin_time.c $(ARCH_ARM_DIR)/latency.c \
+                  $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/irq.c \
+                  $(ARCH_ARM_DIR)/timer.c drivers/gic.c
+
+test-arm-ptime-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/pt_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S -o $(ARM_BUILD_DIR)/pt_smpentry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S   -o $(ARM_BUILD_DIR)/pt_vectors.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/pt_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/ptime_main.c -o $(ARM_BUILD_DIR)/pt_main.o
+	for s in $(VIRT_PTIME_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/pt_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_PTIME_ELF) \
+	    $(ARM_BUILD_DIR)/pt_start.o $(ARM_BUILD_DIR)/pt_smpentry.o \
+	    $(ARM_BUILD_DIR)/pt_main.o $(ARM_BUILD_DIR)/pt_uart.o \
+	    $(ARM_BUILD_DIR)/pt_vectors.o \
+	    $(ARM_BUILD_DIR)/pt_smp.o $(ARM_BUILD_DIR)/pt_spsc_ring.o \
+	    $(ARM_BUILD_DIR)/pt_audio_core.o $(ARM_BUILD_DIR)/pt_audio_worker.o \
+	    $(ARM_BUILD_DIR)/pt_plugin_time.o $(ARM_BUILD_DIR)/pt_latency.o \
+	    $(ARM_BUILD_DIR)/pt_exceptions.o \
+	    $(ARM_BUILD_DIR)/pt_irq.o $(ARM_BUILD_DIR)/pt_timer.o \
+	    $(ARM_BUILD_DIR)/pt_gic.o
+	rm -f $(ARM_BUILD_DIR)/virt_ptime.log
+	-timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_ptime.log -net none \
+	    -kernel $(VIRT_PTIME_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_ptime.log
+	@grep -q "PTIME: PASS" $(ARM_BUILD_DIR)/virt_ptime.log \
+	  && echo "QEMU virt plugin-time test PASSED" \
+	  || { echo "QEMU virt plugin-time test FAILED"; exit 1; }
 
 # Audio latency/jitter reporting test on QEMU 'virt' (issue #22): CPU0 measures
 # every callback (CNTPCT period + IRQ-to-thread wakeup) and publishes stats;

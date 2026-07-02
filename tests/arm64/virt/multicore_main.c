@@ -185,9 +185,14 @@ static void node_crash(void *ctx)
 }
 
 /* ---- CPU0: audio callback (timer IRQ) ---- */
+static volatile uint64_t g_tick_target;   /* freeze exactly at the phase end:
+                                            * a tick can land between the WFI
+                                            * wake and timer_stop            */
 void scheduler_tick(struct trapframe *tf)
 {
     (void)tf;
+    if (g_ac.serviced >= g_tick_target)
+        return;
     g_seq++;
     for (int k = 0; k < 3; k++)
         aw_kick(&g_w[k], g_seq);
@@ -242,6 +247,7 @@ static int drain_all(uint64_t timeout)
 static void run_blocks(uint32_t blocks, uint64_t freq)
 {
     uint64_t target = g_ac.serviced + blocks;
+    g_tick_target = target;
     timer_init(BLOCK_HZ);
     __asm__ volatile("msr daifclr, #2");
     while (g_ac.serviced < target)

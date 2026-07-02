@@ -208,15 +208,20 @@ int graph_sched_apply(graph_sched_t *s, audio_worker_t *workers,
                 edge_reset(np->edge[e].ring, np->edge[e].cross, reset_ctx);
         }
 
-    /* Rewrite the worker node tables in per-worker topological order. */
+    /* Rewrite the worker node tables in per-worker topological order.  Each
+     * slot is tagged with its plugin pid so the per-node time accounting
+     * (issue #77) attributes to the right plugin. */
     for (int k = 0; k < s->n_avail; k++) {
         aw_clear(&workers[k]);
         if (k >= np->n_workers)
             continue;
         for (int i = 0; i < np->n_wnodes[k]; i++) {
             int n = np->wnodes[k][i];
-            if (fns[n].run)
-                aw_assign(&workers[k], fns[n].run, fns[n].ctx);
+            if (fns[n].run) {
+                int slot = aw_assign(&workers[k], fns[n].run, fns[n].ctx);
+                if (slot >= 0)
+                    workers[k].nodes[slot].tag = np->pid[n];
+            }
         }
     }
 
