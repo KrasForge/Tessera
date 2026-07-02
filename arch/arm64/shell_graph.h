@@ -23,6 +23,7 @@
 #define SG_MAX_NODES  16
 #define SG_MAX_EDGES  32
 #define SG_MAX_PARAMS 8         /* params shown per node by `ls`            */
+#define SG_MAX_FILES  16        /* patch files listed by `patch ls`         */
 
 /* A graph node as `ls` sees it. */
 typedef struct {
@@ -70,6 +71,10 @@ typedef struct shell_graph_ops {
     int  (*set_param)(void *be, uint32_t pid, uint32_t param, uint32_t bits);
     void (*describe)(void *be, sg_view_t *v);            /* fill for `ls`   */
     void (*get_stats)(void *be, sg_stats_t *s);          /* fill for `stats`*/
+    /* Patch persistence (issue #82); any may be NULL if unsupported. */
+    long (*patch_save)(void *be, const char *path);      /* -> 0 or <0      */
+    long (*patch_load)(void *be, const char *path);      /* -> 0 or <0      */
+    int  (*patch_list)(void *be, const char **names, int max);  /* -> count  */
     /* Optional: map a failing verb's code to a message.  Verb-aware because
      * the plugin-manager and graph-control error enums overlap numerically. */
     const char *(*strerror)(void *be, const char *verb, int code);

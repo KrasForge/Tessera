@@ -2381,6 +2381,66 @@ test-arm-shell-graph-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 	  && echo "QEMU virt shell-graph test PASSED" \
 	  || { echo "QEMU virt shell-graph test FAILED"; exit 1; }
 
+# Patch persistence from the serial console on QEMU 'virt' (issue #82): the M13
+# "no C" acceptance.  MMU on, single core, reading a scripted console session
+# over `-serial stdio`; the graph and patch commands drive the real plugin
+# manager and a writable in-RAM FAT16 SD card.  The script builds a synth ->
+# filter -> DAC chain, tunes the synth, saves the patch, "reboots" (tears down
+# the graph while the SD card survives), lists the card, reloads the patch, and
+# renders again - the reloaded audio hash must equal the pre-reboot one.  Powers
+# off via PSCI so the log flushes.
+VIRT_SHPATCH_ELF  = $(ARM_BUILD_DIR)/virt_shell_patch.elf
+VIRT_SHPATCH_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                    $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                    $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                    $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                    $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+                    $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+                    $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c \
+                    $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c \
+                    $(ARCH_ARM_DIR)/sandbox.c $(ARCH_ARM_DIR)/string.c \
+                    $(ARCH_ARM_DIR)/shell.c $(ARCH_ARM_DIR)/shell_graph.c
+
+test-arm-shell-patch-qemu: sdk-example $(ARM_BUILD_DIR)/plugin_effect_filter.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/sp_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/sp_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/sp_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/sp_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/shell_patch_blob.S     -o $(ARM_BUILD_DIR)/sp_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/sp_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/shell_patch_main.c -o $(ARM_BUILD_DIR)/sp_main.o
+	for s in $(VIRT_SHPATCH_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/sp_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_SHPATCH_ELF) \
+	    $(ARM_BUILD_DIR)/sp_start.o $(ARM_BUILD_DIR)/sp_main.o \
+	    $(ARM_BUILD_DIR)/sp_uart.o $(ARM_BUILD_DIR)/sp_vectors.o \
+	    $(ARM_BUILD_DIR)/sp_entry.o $(ARM_BUILD_DIR)/sp_tramp.o \
+	    $(ARM_BUILD_DIR)/sp_blob.o \
+	    $(ARM_BUILD_DIR)/sp_pmm.o $(ARM_BUILD_DIR)/sp_mmu.o \
+	    $(ARM_BUILD_DIR)/sp_vmem.o $(ARM_BUILD_DIR)/sp_process.o \
+	    $(ARM_BUILD_DIR)/sp_exceptions.o $(ARM_BUILD_DIR)/sp_syscalls.o \
+	    $(ARM_BUILD_DIR)/sp_elf64.o $(ARM_BUILD_DIR)/sp_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/sp_audio_ringbuf.o $(ARM_BUILD_DIR)/sp_audio_graph.o \
+	    $(ARM_BUILD_DIR)/sp_graph_control.o $(ARM_BUILD_DIR)/sp_param_queue.o \
+	    $(ARM_BUILD_DIR)/sp_plugin_mgr.o $(ARM_BUILD_DIR)/sp_patch.o \
+	    $(ARM_BUILD_DIR)/sp_vfs.o $(ARM_BUILD_DIR)/sp_fat.o \
+	    $(ARM_BUILD_DIR)/sp_sandbox.o $(ARM_BUILD_DIR)/sp_string.o \
+	    $(ARM_BUILD_DIR)/sp_shell.o $(ARM_BUILD_DIR)/sp_shell_graph.o
+	rm -f $(ARM_BUILD_DIR)/virt_shell_patch.log
+	printf 'load /rd/synth\rload /rd/effect\rwire 1 2\rwire 2 dac\rset-param 1 0 880\rrun\rpatch save /sd/live.patch\rreboot\rpatch ls\rpatch load /sd/live.patch\rrun\rpatch load /sd/missing.patch\rdone\r' \
+	  | timeout 30 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 1 -m 256M \
+	    -display none -serial stdio -monitor none -net none \
+	    -kernel $(VIRT_SHPATCH_ELF) > $(ARM_BUILD_DIR)/virt_shell_patch.log 2>&1 || true
+	@cat $(ARM_BUILD_DIR)/virt_shell_patch.log
+	@grep -q "SHELL-PATCH: PASS" $(ARM_BUILD_DIR)/virt_shell_patch.log \
+	  && grep -q "saved /sd/live.patch" $(ARM_BUILD_DIR)/virt_shell_patch.log \
+	  && grep -q "LIVE.PAT" $(ARM_BUILD_DIR)/virt_shell_patch.log \
+	  && grep -q "error: patch load:" $(ARM_BUILD_DIR)/virt_shell_patch.log \
+	  && echo "QEMU virt shell-patch test PASSED" \
+	  || { echo "QEMU virt shell-patch test FAILED"; exit 1; }
+
 # M9 SDK acceptance on QEMU 'virt' (issue #38): build the example plugin with
 # ONLY the published SDK (its own Makefile, no kernel headers), then load that
 # ELF and prove it audits clean, produces audio, and responds to a parameter

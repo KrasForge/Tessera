@@ -243,6 +243,51 @@ static int cmd_stats(shell_t *sh, int argc, char **argv)
     return 0;
 }
 
+static int cmd_patch(shell_t *sh, int argc, char **argv)
+{
+    shell_graph_ops_t *o = ops_of(sh);
+    if (argc < 2) {
+        usage(sh, "patch <save|load|ls> [path]");
+        return 0;
+    }
+
+    if (streq(argv[1], "save")) {
+        if (argc != 3 || !o->patch_save) { usage(sh, "patch save <path>"); return 0; }
+        long r = o->patch_save(o->be, argv[2]);
+        if (r < 0) { fail(sh, "patch save", (int)r); return 0; }
+        shell_write(sh, "saved ");
+        shell_write(sh, argv[2]);
+        shell_write(sh, "\r\n");
+        return 0;
+    }
+    if (streq(argv[1], "load")) {
+        if (argc != 3 || !o->patch_load) { usage(sh, "patch load <path>"); return 0; }
+        long r = o->patch_load(o->be, argv[2]);
+        if (r < 0) { fail(sh, "patch load", (int)r); return 0; }
+        shell_write(sh, "loaded ");
+        shell_write(sh, argv[2]);
+        shell_write(sh, "\r\n");
+        return 0;
+    }
+    if (streq(argv[1], "ls")) {
+        if (!o->patch_list) { shell_write(sh, "patches: (unsupported)\r\n"); return 0; }
+        const char *names[SG_MAX_FILES];
+        int n = o->patch_list(o->be, names, SG_MAX_FILES);
+        shell_write(sh, "patches:\r\n");
+        if (n <= 0)
+            shell_write(sh, "  (none)\r\n");
+        for (int i = 0; i < n && i < SG_MAX_FILES; i++) {
+            shell_write(sh, "  ");
+            shell_write(sh, names[i]);
+            shell_write(sh, "\r\n");
+        }
+        return 0;
+    }
+
+    usage(sh, "patch <save|load|ls> [path]");
+    return 0;
+}
+
 const shell_cmd_t shell_graph_cmds[] = {
     { "load",      "load a plugin: load <path>",           cmd_load     },
     { "unload",    "unload a plugin: unload <pid>",        cmd_unload   },
@@ -251,6 +296,7 @@ const shell_cmd_t shell_graph_cmds[] = {
     { "set-param", "set-param <pid> <id> <value>",         cmd_setparam },
     { "ls",        "list the graph",                       cmd_ls       },
     { "stats",     "show audio / per-plugin stats",        cmd_stats    },
+    { "patch",     "patch save|load|ls <path>",            cmd_patch    },
 };
 const int shell_graph_ncmds = (int)(sizeof(shell_graph_cmds) /
                                     sizeof(shell_graph_cmds[0]));

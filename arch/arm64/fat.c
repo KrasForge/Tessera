@@ -120,6 +120,43 @@ long fat_read_file(fat_fs_t *fs, const char *name, uint8_t *buf, uint32_t max)
     return (long)copied;
 }
 
+/* Enumerate the root directory (issue #82): decode each live 8.3 entry into a
+ * "NAME.EXT" string and hand it to `cb`.  Returns the number of files, or a
+ * negative value on a read error. */
+int fat_list(fat_fs_t *fs, void (*cb)(void *ctx, const char *name), void *ctx)
+{
+    int count = 0;
+    for (uint32_t s = 0; s < fs->root_sectors; s++) {
+        uint8_t dir[FAT_SECTOR];
+        if (fs->read(fs->ctx, fs->root_start + s, dir) != 0)
+            return -1;
+        for (uint32_t e = 0; e < FAT_SECTOR; e += 32) {
+            if (dir[e] == 0x00)                          /* end of directory */
+                return count;
+            if (dir[e] == 0xE5 || (dir[e + 11] & 0x0F) == 0x0F)
+                continue;                                /* deleted / LFN     */
+            if (dir[e + 11] & 0x08)
+                continue;                                /* volume label      */
+
+            /* Decode the space-padded 8.3 field into "name.ext". */
+            char name[13];
+            int  k = 0;
+            for (int i = 0; i < 8 && dir[e + i] != ' '; i++)
+                name[k++] = (char)dir[e + i];
+            if (dir[e + 8] != ' ') {
+                name[k++] = '.';
+                for (int i = 8; i < 11 && dir[e + i] != ' '; i++)
+                    name[k++] = (char)dir[e + i];
+            }
+            name[k] = '\0';
+            if (cb)
+                cb(ctx, name);
+            count++;
+        }
+    }
+    return count;
+}
+
 /* ---- write support (Issue #40) ------------------------------------------- */
 
 static void wr16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }

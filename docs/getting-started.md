@@ -159,6 +159,9 @@ On real hardware the plugin is loaded from the SD card:
   source, `#include "tessera.h"`, implement the five exports, and `make`.
 - Study [`sdk/examples/sine_plugin/sine_plugin.c`](../sdk/examples/sine_plugin/sine_plugin.c),
   which is commented end to end and shows every SDK helper.
+- Drive your plugin from the **[serial shell](shell.md)** - `load`, `wire`,
+  `set-param`, and `patch save`/`load` let you build, tune, and persist a graph
+  from the console without recompiling.
 
 ## 7. Common errors
 

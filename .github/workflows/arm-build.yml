@@ -240,6 +240,9 @@ jobs:
       - name: Build a graph from the console on QEMU virt (synth -> filter -> DAC)
         run: make test-arm-shell-graph-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Patch save/reboot/reload from the console on QEMU virt (no-C acceptance)
+        run: make test-arm-shell-patch-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   latency-tests:
     name: M4 latency - audio jitter stats host tests + QEMU virt reporting
     runs-on: ubuntu-22.04
