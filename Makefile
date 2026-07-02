@@ -2090,17 +2090,21 @@ VIRT_RES_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
 
 test-arm-resilience-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
                           $(ARM_BUILD_DIR)/plugin_crash.elf \
-                          $(ARM_BUILD_DIR)/plugin_evil2.elf
+                          $(ARM_BUILD_DIR)/plugin_evil2.elf \
+                          $(ARM_BUILD_DIR)/plugin_hog.elf
 	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/rs_start.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/rs_vectors.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/rs_entry.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/rs_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S       -o $(ARM_BUILD_DIR)/rs_smpentry.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/resilience_blob.S      -o $(ARM_BUILD_DIR)/rs_blob.o
-	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/rs_uart.o
-	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/resilience_main.c -o $(ARM_BUILD_DIR)/rs_main.o
-	for s in $(VIRT_RES_SRCS); do \
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/rs_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/resilience_main.c -o $(ARM_BUILD_DIR)/rs_main.o
+	for s in $(VIRT_RES_SRCS) $(ARCH_ARM_DIR)/budget.c $(ARCH_ARM_DIR)/smp.c \
+	         $(ARCH_ARM_DIR)/irq.c $(ARCH_ARM_DIR)/timer.c \
+	         $(ARCH_ARM_DIR)/latency.c drivers/gic.c; do \
 	  o=$(ARM_BUILD_DIR)/rs_$$(basename $${s%.c}).o; \
-	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
 	done
 	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_RES_ELF) \
 	    $(ARM_BUILD_DIR)/rs_start.o $(ARM_BUILD_DIR)/rs_main.o \
@@ -2115,7 +2119,11 @@ test-arm-resilience-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 	    $(ARM_BUILD_DIR)/rs_graph_control.o $(ARM_BUILD_DIR)/rs_param_queue.o \
 	    $(ARM_BUILD_DIR)/rs_plugin_mgr.o $(ARM_BUILD_DIR)/rs_patch.o $(ARM_BUILD_DIR)/rs_vfs.o \
 	    $(ARM_BUILD_DIR)/rs_fat.o $(ARM_BUILD_DIR)/rs_sandbox.o \
-	    $(ARM_BUILD_DIR)/rs_string.o
+	    $(ARM_BUILD_DIR)/rs_string.o \
+	    $(ARM_BUILD_DIR)/rs_budget.o $(ARM_BUILD_DIR)/rs_smp.o \
+	    $(ARM_BUILD_DIR)/rs_smpentry.o \
+	    $(ARM_BUILD_DIR)/rs_irq.o $(ARM_BUILD_DIR)/rs_timer.o \
+	    $(ARM_BUILD_DIR)/rs_latency.o $(ARM_BUILD_DIR)/rs_gic.o
 	rm -f $(ARM_BUILD_DIR)/virt_resilience.log
 	-timeout 30 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
 	    -display none -serial file:$(ARM_BUILD_DIR)/virt_resilience.log -net none \
@@ -2141,7 +2149,8 @@ VIRT_MC_SRCS = $(VIRT_RES_SRCS) $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.
 
 test-arm-multicore-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
                          $(ARM_BUILD_DIR)/plugin_crash.elf \
-                         $(ARM_BUILD_DIR)/plugin_evil2.elf
+                         $(ARM_BUILD_DIR)/plugin_evil2.elf \
+                         $(ARM_BUILD_DIR)/plugin_hog.elf
 	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/mc_start.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S       -o $(ARM_BUILD_DIR)/mc_smpentry.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/mc_vectors.o
