@@ -44,9 +44,16 @@ typedef struct {
     audio_graph_t     graph;
     gc_ring_ops_t     ops;
     volatile uint32_t generation;   /* even = stable, odd = mid-rewire */
+    void            (*on_change)(void *ctx);  /* fired after any successful  */
+    void             *on_change_ctx;          /* mutation (issue #75)        */
 } graph_control_t;
 
 void gc_init(graph_control_t *gc, const gc_ring_ops_t *ops);
+
+/* Optional: `fn(ctx)` runs after every successful graph mutation (node add,
+ * connect, disconnect) - the hook the graph scheduler uses to stage a new
+ * node-to-core plan (issue #75). */
+void gc_set_on_change(graph_control_t *gc, void (*fn)(void *ctx), void *ctx);
 
 /* Register graph nodes by PID before wiring (DAC uses pid 0). */
 int gc_add_plugin(graph_control_t *gc, uint32_t pid);

@@ -181,6 +181,12 @@ jobs:
       - name: Per-core audio workers on QEMU virt (stalled-worker containment)
         run: make test-arm-worker-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Graph-partitioner host unit tests (planner + stage/apply, ASan + UBSan)
+        run: make test-arm-gsched
+
+      - name: Graph partitioning on QEMU virt (live rewire + cross-core split)
+        run: make test-arm-gsched-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   latency-tests:
     name: M4 latency - audio jitter stats host tests + QEMU virt reporting
     runs-on: ubuntu-22.04
