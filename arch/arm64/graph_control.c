@@ -9,6 +9,44 @@ void gc_init(graph_control_t *gc, const gc_ring_ops_t *ops)
     gc->generation = 0;
     gc->on_change = (void (*)(void *))0;
     gc->on_change_ctx = (void *)0;
+    for (int i = 0; i < GRAPH_MAX_NODES; i++) {
+        gc->budgets[i].pid    = 0;
+        gc->budgets[i].cycles = 0;
+    }
+}
+
+int gc_set_budget(graph_control_t *gc, uint32_t pid, uint64_t cycles)
+{
+    if (pid == 0 || audio_graph_node_by_pid(&gc->graph, pid) < 0)
+        return GC_ENODEV;
+
+    int free_slot = -1;
+    for (int i = 0; i < GRAPH_MAX_NODES; i++) {
+        if (gc->budgets[i].pid == pid) {
+            if (cycles)
+                gc->budgets[i].cycles = cycles;
+            else
+                gc->budgets[i].pid = 0;        /* clear back to default */
+            return GC_OK;
+        }
+        if (free_slot < 0 && gc->budgets[i].pid == 0)
+            free_slot = i;
+    }
+    if (!cycles)
+        return GC_OK;                          /* nothing set, nothing to clear */
+    if (free_slot < 0)
+        return GC_ENOMEM;
+    gc->budgets[free_slot].pid    = pid;
+    gc->budgets[free_slot].cycles = cycles;
+    return GC_OK;
+}
+
+uint64_t gc_budget(const graph_control_t *gc, uint32_t pid)
+{
+    for (int i = 0; i < GRAPH_MAX_NODES; i++)
+        if (gc->budgets[i].pid == pid)
+            return gc->budgets[i].cycles;
+    return 0;
 }
 
 void gc_set_on_change(graph_control_t *gc, void (*fn)(void *ctx), void *ctx)

@@ -11,6 +11,7 @@ void pt_board_init(pt_board_t *b)
         b->e[i].tag      = 0;
         b->e[i].runs     = 0;
         b->e[i].overruns = 0;
+        b->e[i].offences = 0;
         b->e[i].min      = 0;
         b->e[i].max      = 0;
         b->e[i].sum      = 0;
@@ -34,6 +35,7 @@ void pt_publish(audio_worker_t *w, void *board)
         b->e[i].tag      = nd->tag;
         b->e[i].runs     = nd->runs;
         b->e[i].overruns = nd->overruns;
+        b->e[i].offences = nd->offences;
         b->e[i].min      = nd->runs ? nd->svc_min : 0;
         b->e[i].max      = nd->svc_max;
         b->e[i].sum      = nd->svc_sum;
@@ -110,6 +112,8 @@ int pt_render(const pt_entry_t *e, const char *name, uint64_t cntfrq,
     at = put_u64(out, cap, at, lat_cyc_to_us(mean, cntfrq));
     at = put_str(out, cap, at, "us overruns=");
     at = put_u64(out, cap, at, e->overruns);
+    at = put_str(out, cap, at, " offences=");
+    at = put_u64(out, cap, at, e->offences);
     out[at] = '\0';
     return at;
 }

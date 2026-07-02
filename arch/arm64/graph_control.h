@@ -46,6 +46,10 @@ typedef struct {
     volatile uint32_t generation;   /* even = stable, odd = mid-rewire */
     void            (*on_change)(void *ctx);  /* fired after any successful  */
     void             *on_change_ctx;          /* mutation (issue #75)        */
+    struct {                        /* per-plugin CPU budgets (issue #78)   */
+        uint32_t pid;               /* 0 = free slot                        */
+        uint64_t cycles;
+    } budgets[GRAPH_MAX_NODES];
 } graph_control_t;
 
 void gc_init(graph_control_t *gc, const gc_ring_ops_t *ops);
@@ -69,6 +73,15 @@ int gc_disconnect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid);
 /* sys_graph_list: copy the current edges into `out` (capacity `max`); returns
  * the number of edges. */
 int gc_list(graph_control_t *gc, gc_edge_info_t *out, int max);
+
+/* sys_plugin_set_budget: set the per-block CPU budget (counter cycles) for a
+ * registered plugin (issue #78); cycles == 0 clears it back to the default
+ * fair share.  Returns GC_OK, or GC_ENODEV for an unknown pid. */
+int gc_set_budget(graph_control_t *gc, uint32_t pid, uint64_t cycles);
+
+/* The budget set for `pid`, or 0 when none is set (the host then applies
+ * budget_fair_share, see budget.h). */
+uint64_t gc_budget(const graph_control_t *gc, uint32_t pid);
 
 /* Current generation (acquire load).  Even between rewires. */
 uint32_t gc_generation(const graph_control_t *gc);

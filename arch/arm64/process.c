@@ -11,6 +11,7 @@
 #include "mmu.h"
 #include "vmem.h"
 #include "usermode.h"
+#include "budget.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -197,6 +198,13 @@ long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
     g_current = prev;
 
     p->exit_code = code;
+    if (code == BUDGET_PREEMPTED) {
+        /* Preempted at its budget boundary (issue #78): not dead - the host's
+         * escalation policy decides whether it runs again.  No liveness
+         * broadcast; downstream keeps reading (the host mutes the output). */
+        p->state = PROC_READY;
+        return code;
+    }
     p->state = (code < 0) ? PROC_KILLED : PROC_ZOMBIE;
 
     /* On a fault kill, publish the death into the shared status word so a host

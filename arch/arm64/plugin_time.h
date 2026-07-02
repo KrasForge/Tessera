@@ -39,6 +39,7 @@ typedef struct {
     uint32_t tag;                /* attribution id (plugin pid)             */
     uint64_t runs;               /* blocks executed                         */
     uint64_t overruns;           /* blocks missed (charged by aw_kick)      */
+    uint64_t offences;           /* budget offences (issue #78)             */
     uint64_t min, max, sum;      /* service time; min/max 0 until first run */
 } pt_entry_t;
 

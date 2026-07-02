@@ -148,26 +148,26 @@ static void test_render(void)
     printf("- render: the plugin_time line, cycles -> us\n");
     /* 62.5 MHz: 62500 cycles = 1000 us, 625 cycles = 10 us. */
     const uint64_t freq = 62500000ull;
-    pt_entry_t e = { .tag = 7, .runs = 999, .overruns = 2,
+    pt_entry_t e = { .tag = 7, .runs = 999, .overruns = 2, .offences = 5,
                      .min = 625, .max = 62500, .sum = 999 * 1250 };
     char line[128];
 
     int n = pt_render(&e, "sine", freq, line, sizeof line);
     CHECK(n == (int)strlen(line), "returns the rendered length");
     CHECK(strcmp(line, "plugin_time: pid=7 (sine) runs=999 min=10us "
-                       "max=1000us mean=20us overruns=2") == 0,
+                       "max=1000us mean=20us overruns=2 offences=5") == 0,
           "named line matches exactly");
 
     pt_render(&e, 0, freq, line, sizeof line);
     CHECK(strcmp(line, "plugin_time: pid=7 runs=999 min=10us "
-                       "max=1000us mean=20us overruns=2") == 0,
+                       "max=1000us mean=20us overruns=2 offences=5") == 0,
           "anonymous line omits the name");
 
-    pt_entry_t z = { .tag = 1, .runs = 0, .overruns = 0,
+    pt_entry_t z = { .tag = 1, .runs = 0, .overruns = 0, .offences = 0,
                      .min = 0, .max = 0, .sum = 0 };
     pt_render(&z, 0, freq, line, sizeof line);
     CHECK(strcmp(line, "plugin_time: pid=1 runs=0 min=0us "
-                       "max=0us mean=0us overruns=0") == 0,
+                       "max=0us mean=0us overruns=0 offences=0") == 0,
           "a never-run node renders zeros");
 
     /* Truncation stays NUL-terminated and in bounds. */

@@ -26,6 +26,12 @@
 /* Enable the distributor and this CPU's interface (priority mask open). */
 void gic_init(void);
 
+/* Enable a secondary core's (banked) CPU interface; the distributor is
+ * already up from gic_init() on the boot core.  Call from the core itself
+ * before it enables any interrupt - e.g. its plugin-budget timer PPI
+ * (issue #78; PPI enables via gic_enable_irq are banked per core too). */
+void gic_cpu_init(void);
+
 /* Enable a specific interrupt ID, route it to CPU 0 at highest priority. */
 void gic_enable_irq(uint32_t irq);
 
