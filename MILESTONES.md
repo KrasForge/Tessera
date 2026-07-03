@@ -106,6 +106,11 @@ Scope:
 overruns on an otherwise-idle CM4, and the resilience demo is captured on the
 same board.
 
+For the broader landscape of boards Tessera could target beyond the CM4 - the
+emulatable-now options (Pi 3, Xilinx ZynqMP, SBSA), the product-grade audio
+SoCs (i.MX8M, Rockchip), and the HAL / device-tree work that makes new boards
+cheap - see [`docs/hardware-targets.md`](docs/hardware-targets.md).
+
 ---
 
 ## Planned
