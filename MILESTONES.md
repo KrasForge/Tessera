@@ -175,3 +175,18 @@ DAC, with measured round-trip latency published in
 - **SDK conformance tool** - ship the `make verify-plugin-abi` checks as a
   standalone tool third-party authors can run against their binaries before
   distributing them.
+
+---
+
+## Roadmaps and ideas
+
+Two longer-form planning documents expand on the milestones above; neither is a
+commitment, just a place to draw from:
+
+- [`docs/hardware-targets.md`](docs/hardware-targets.md) - the boards and SoCs
+  Tessera could target beyond the CM4, and the portability work (a board HAL,
+  device-tree parsing) that makes new boards cheap.
+- [`docs/feature-ideas.md`](docs/feature-ideas.md) - capability ideas
+  (never-go-silent reliability, DSP building blocks, timing, routing, control,
+  the plugin ecosystem) grouped by theme, with the isolation-differentiating
+  ones flagged.
