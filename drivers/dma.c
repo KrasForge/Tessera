@@ -24,6 +24,22 @@ void dma_audio_cb_init(dma_cb_t *cb, uint32_t src_bus, uint32_t dst_bus,
     cb->reserved[1] = 0;
 }
 
+void dma_audio_rx_cb_init(dma_cb_t *cb, uint32_t src_bus, uint32_t dst_bus,
+                          uint32_t len_bytes, uint32_t next_bus)
+{
+    /* Mirror of the TX control block: the FIFO is now the source (paced by
+     * the PCM RX DREQ) and RAM is the incrementing destination. */
+    cb->ti = DMA_TI_DEST_INC | DMA_TI_SRC_DREQ | DMA_TI_WAIT_RESP |
+             DMA_TI_INTEN | (DMA_DREQ_PCM_RX << DMA_TI_PERMAP_SHIFT);
+    cb->source_ad   = src_bus;
+    cb->dest_ad     = dst_bus;
+    cb->txfr_len    = len_bytes;
+    cb->stride      = 0;
+    cb->nextconbk   = next_bus;
+    cb->reserved[0] = 0;
+    cb->reserved[1] = 0;
+}
+
 /* ---- MMIO driver ---------------------------------------------------- */
 #ifndef HOSTTEST
 

@@ -58,4 +58,25 @@ void i2s_write_samples(const int16_t *buf, size_t count);
 /* Generate and play `count` sample pairs of a `freq` Hz sine (mono->stereo). */
 void i2s_play_tone(uint32_t freq, uint32_t count);
 
+/* ---- capture / RX (issue #83, M14) ---------------------------------- *
+ *
+ * The RX path shares the PCM block, its BCLK/LRCLK, and the sample clock with
+ * TX, so captured audio is inherently sample-locked to playback.  Wire the
+ * external ADC's data line to GPIO 20 (PCM_DIN, ALT0); see docs/hardware.md. */
+
+/* Enable the RX channel and start capturing into the PCM RX FIFO.  Call after
+ * i2s_init() (which brought up the shared clock and TX). */
+void i2s_capture_enable(void);
+
+/* Polled read of one stereo frame from the RX FIFO (bounded wait).  Returns 0
+ * and fills *left/*right, or -1 if no sample arrived (e.g. under emulation). */
+int i2s_read_stereo(int16_t *left, int16_t *right);
+
+/* Start a DMA channel capturing the RX FIFO into `buf_bus` (a bus address of a
+ * RAM buffer) as a `len_bytes` transfer, using `cb` (a RAM-resident control
+ * block, passed by its own bus address `cb_bus`).  The channel chains the CB
+ * to itself for continuous capture. */
+void i2s_capture_dma_start(int channel, uint32_t cb_bus, void *cb,
+                           uint32_t buf_bus, uint32_t len_bytes);
+
 #endif /* I2S_H */
