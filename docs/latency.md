@@ -110,3 +110,121 @@ Procedure on hardware:
 
 **Acceptance target:** max jitter below 500 us on an otherwise-idle system, and
 the overrun counter at zero.
+
+# Round-trip Latency (M14: live in, through an effect, out)
+
+The audio-callback section above measures the *cadence* of one core. This
+section measures the **round trip**: how long a single sample takes to travel
+from the capture edge (the ADC/DMA finishing a block) all the way to the DAC
+output, through the audio graph. For a guitar pedal the round-trip number *is*
+the product spec, so it is measured with the counter, not estimated (issue #85).
+
+## What is measured
+
+Two points on the same `CNTPCT_EL0` basis as `arch/arm64/latency.c`:
+
+1. **Capture edge** - the moment a captured block is handed to the software
+   (produced into the I2S capture ring, `drivers/i2s_capture.c`, issue #83). A
+   timestamp is recorded for that block.
+2. **DAC output** - the moment the corresponding block is emitted to the DAC.
+   The round trip is the difference of the two counter values.
+
+The measurement tracks each block's capture timestamp out of band (a small FIFO
+travelling in lockstep with the audio through the rings), so the correlation is
+exact and does not depend on recovering a marker from the filtered audio. The
+harness reports `min` / `max` / `mean` (and `stddev`) in microseconds, the same
+shape as the callback stats above.
+
+## Buffer accounting (the theoretical minimum)
+
+The round trip is dominated by two one-block ring delays that sit *outside* the
+graph compute, exactly where they sit in hardware. At the M14 geometry
+(`RING_BLOCK` = 256 frames, `RING_SR` = 48 kHz) one block is 256 / 48000 =
+**5.333 ms**.
+
+| Stage                         | Boundary crossed        | Latency      |
+|-------------------------------|-------------------------|--------------|
+| Capture ring (ADC/DMA -> input node) | 1 block boundary | 1 block (5.333 ms) |
+| Graph compute (input -> filter -> DAC) | same period, no boundary | ~0 (a few us) |
+| DAC output ring (DAC node -> DAC/DMA) | 1 block boundary | 1 block (5.333 ms) |
+| **Total (digital minimum)**   |                         | **2 blocks (10.667 ms)** |
+
+So the predicted round trip is **2 blocks**. The graph compute runs within a
+single period and its cost (microseconds) does not cross a block boundary, so it
+does not add a block. On real hardware the analog ADC and DAC converters add
+their own group delay (tens of samples of filter latency each), and a sample
+captured mid-block waits up to one block for the next boundary; those are added
+on top of this digital minimum when the CM4 numbers are captured below.
+
+## How it is reported and reproduced
+
+```
+# End-to-end loopback on the emulated machine:
+make test-arm-roundtrip-qemu CROSS_COMPILE=aarch64-linux-gnu-
+```
+
+The QEMU `virt` harness (`tests/arm64/virt/roundtrip_main.c`) builds the real
+graph - the capture input node (issue #84) -> the reference low-pass plugin
+(issue #29) -> the DAC - and wraps it in the two one-block ring delays above. A
+**modelled loopback** feeds each DAC-output block back into the capture source
+(the stand-in for a physical DAC-out-to-ADC-in cable), and a DC step injected at
+the start gives a signal to trace end to end through the filter. Time is paced
+by busy-waiting on `CNTPCT` to a per-block deadline, so each period lasts one
+real block interval and the measured round trip lands at ~2 blocks.
+
+The harness asserts the deterministic thing - the per-block delay is **exactly
+2**, a zero-block error against the buffer-accounting prediction - and reports
+the microsecond figure. It also checks the data path (the injected step comes
+out of the DAC non-silent) and that no block is dropped or duplicated
+(`overruns` = `underruns` = 0).
+
+## Results: QEMU `virt` (emulated, CI)
+
+Captured from `make test-arm-roundtrip-qemu` (Cortex-A72, `CNTFRQ` = 62.5 MHz,
+256-frame blocks at 48 kHz, 64 blocks, single core, MMU on):
+
+```
+CNTFRQ=62500000 Hz, block=256 frames @ 48000 Hz -> 5333 us/block, predicted round trip = 2 blocks = 10666 us
+first signal out at block 2 (delay=2 blocks)
+roundtrip: min=9681us max=10592us mean=10551us stddev=125us samples=62
+delay: exactly-2-blocks=62 off-by=0  (predicted 2 blocks)
+capture: overruns=0 underruns=0  dac-sound-blocks=62
+checks: data-path=1 accounting=1 clean=1 measured-in-1-block=1
+```
+
+Every measured block took **exactly 2 block periods** (a 0-block error against
+the prediction), the DC step travelled input -> filter -> DAC and emerged
+non-silent, and the counter-derived mean (~10.55 ms) sits within one block of
+the 10.667 ms prediction. As with the callback stats, the absolute microsecond
+spread is a property of the pacing, not cycle-accurate hardware; the harness
+asserts the deterministic block count and reports the microseconds.
+
+## Results: Raspberry Pi CM4 (real hardware)
+
+> To be captured on a board with a physical DAC-out-to-ADC-in loopback cable.
+> The CI runners provide neither the `raspi4b` QEMU machine nor real hardware,
+> so these numbers must come from a physical CM4 run of the same audio build.
+
+Procedure on hardware:
+
+1. Boot the kernel on the CM4 with the audio graph running the reference
+   low-pass: capture input -> filter -> DAC, at the real 48 kHz / 256-frame
+   cadence driven by the PCM/I2S DMA completion interrupt.
+2. Wire a **loopback cable** from the DAC/line output back to the ADC/line
+   input, so the emitted audio is re-captured.
+3. Inject a single click (or GPIO-toggled marker) into the capture stream, or
+   drive the DAC output with a known impulse, and record `CNTPCT_EL0` at the
+   capture edge and at the DAC block that carries the returned marker.
+4. Optionally toggle a GPIO at both instants and capture with a logic analyser
+   to cross-check the counter-derived round trip against wall-clock.
+5. Record the `roundtrip:` line for an otherwise-idle system and again under
+   load on CPU1-3.
+
+| Condition            | min | max | mean | stddev | blocks | notes                 |
+|----------------------|-----|-----|------|--------|--------|-----------------------|
+| Idle                 | TBD | TBD | TBD  | TBD    | TBD    | + ADC/DAC group delay |
+| Load on CPU1-3       | TBD | TBD | TBD  | TBD    | TBD    | + ADC/DAC group delay |
+
+**Sanity check:** the measured round trip should be the 2-block digital minimum
+(10.667 ms) plus the converters' analog group delay; a number far from that
+points at an extra buffer in the path.

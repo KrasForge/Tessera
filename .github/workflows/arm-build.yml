@@ -394,6 +394,9 @@ jobs:
       - name: Capture input node end to end on QEMU virt (input -> filter -> DAC)
         run: make test-arm-graph-input-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Round-trip latency loopback on QEMU virt (in -> effect -> out, delay == 2 blocks)
+        run: make test-arm-roundtrip-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   control-syscall-tests:
     name: M7 control syscalls - param-queue host test + QEMU virt load/unload
     runs-on: ubuntu-22.04
