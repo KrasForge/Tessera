@@ -128,6 +128,44 @@ static void test_full(void)
     CHECK(audio_graph_add_node(&g, 999) == -1, "add beyond capacity rejected");
 }
 
+static void test_input_node(void)
+{
+    printf("- capture input node (issue #84)\n");
+    audio_graph_t g;
+    audio_graph_init(&g, valid_pid);
+    int in  = audio_graph_add_input(&g);
+    int eff = audio_graph_add_node(&g, 1);
+    int dac = audio_graph_add_dac(&g);
+    CHECK(in >= 0 && g.input_node == in, "input node added as a singleton");
+    CHECK(audio_graph_add_input(&g) == -1, "second input rejected");
+    CHECK(audio_graph_node_by_pid(&g, GRAPH_INPUT_PID) == in,
+          "input found by reserved pid");
+
+    CHECK(audio_graph_connect(&g, in, eff) >= 0, "input -> effect ok");
+    CHECK(audio_graph_connect(&g, eff, in) == -1, "input cannot be a destination");
+    CHECK(audio_graph_connect(&g, eff, dac) >= 0, "effect -> DAC ok");
+
+    int order[GRAPH_MAX_NODES];
+    int n = audio_graph_toposort(&g, order, GRAPH_MAX_NODES);
+    int pi = -1, pe = -1, pd = -1;
+    for (int i = 0; i < n; i++) {
+        if (order[i] == in)  pi = i;
+        if (order[i] == eff) pe = i;
+        if (order[i] == dac) pd = i;
+    }
+    CHECK(n == 3 && pi < pe && pe < pd, "input before effect before DAC");
+
+    /* input -> DAC directly (the bypass path) is a legal edge. */
+    audio_graph_disconnect(&g, in, eff);
+    audio_graph_disconnect(&g, eff, dac);
+    CHECK(audio_graph_connect(&g, in, dac) >= 0, "input -> DAC bypass ok");
+
+    /* Removing the input clears the singleton slot. */
+    audio_graph_remove_node(&g, in);
+    CHECK(g.input_node == -1, "input_node cleared on removal");
+    CHECK(audio_graph_add_input(&g) >= 0, "a fresh input can be re-added");
+}
+
 int main(void)
 {
     printf("=== Tessera audio-graph tests (issue #27) ===\n");
@@ -137,6 +175,7 @@ int main(void)
     test_invalid_pid();
     test_rules();
     test_full();
+    test_input_node();
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;
 }

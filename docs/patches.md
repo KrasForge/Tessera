@@ -22,11 +22,10 @@ panics).
 
 ```
 # tessera-patch v1
-plugin synth                 # plugin 0 (path passed to sys_plugin_load)
-plugin effect                # plugin 1
+plugin effect                # plugin 0 (path passed to sys_plugin_load)
 param 0 0 0x445c0000         # plugin 0, param id 0 = 880.0  (IEEE-754 hex)
-connect 0 1                  # plugin 0 -> plugin 1
-connect 1 dac                # plugin 1 -> the DAC sink
+connect input 0              # the audio input -> plugin 0 (issue #84)
+connect 0 dac                # plugin 0 -> the DAC sink
 ```
 
 - `plugin <path>` - loads an ELF by path; plugins are numbered 0, 1, ... in the
@@ -35,8 +34,9 @@ connect 1 dac                # plugin 1 -> the DAC sink
   IEEE-754 hex bit patterns (exact, and the kernel needs no floating point to
   read or write them). When editing by hand, a plain decimal integer is also
   accepted, e.g. `param 0 0 880`.
-- `connect <src> <dst>` - a graph edge; `dst` is a plugin number or `dac` for
-  the audio output.
+- `connect <src> <dst>` - a graph edge. `src` is a plugin number or `input` for
+  the captured audio input; `dst` is a plugin number or `dac` for the audio
+  output.
 - Lines beginning with `#` are comments; blank lines are ignored.
 
 The format is plain text so a developer can open a patch in an editor and change

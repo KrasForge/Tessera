@@ -77,6 +77,14 @@ int gc_add_dac(graph_control_t *gc)
     return n;
 }
 
+int gc_add_input(graph_control_t *gc)
+{
+    int n = audio_graph_add_input(&gc->graph);
+    if (n >= 0)
+        gc_changed(gc);
+    return n;
+}
+
 /* Seqlock write fences: bump to odd before mutating, to even after, with
  * release ordering so a reader sees a coherent before/after edge list. */
 static void gc_begin(graph_control_t *gc)

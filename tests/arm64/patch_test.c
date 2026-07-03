@@ -75,6 +75,23 @@ int main(void)
     CHECK(patches_equal(&p, &q), "round-trip is identical");
     CHECK(q.edges[1].dst == PATCH_DAC, "DAC edge preserved");
 
+    /* ---- a capture-input edge round-trips (issue #84) ---- */
+    patch_t pi;
+    patch_init(&pi);
+    int fe = patch_add_plugin(&pi, "/rd/effect");
+    CHECK(fe == 0, "one plugin added");
+    patch_add_edge(&pi, PATCH_INPUT, fe);          /* input -> effect */
+    patch_add_edge(&pi, fe, PATCH_DAC);            /* effect -> DAC   */
+    char itext[256];
+    long in = patch_serialize(&pi, itext, sizeof(itext));
+    CHECK(in > 0 && strstr(itext, "connect input 0") != 0,
+          "input edge serialises as 'connect input 0'");
+    patch_t qi;
+    CHECK(patch_parse(itext, (uint32_t)in, &qi) == PATCH_OK, "input patch parses");
+    CHECK(qi.edges[0].src == PATCH_INPUT && qi.edges[0].dst == 0,
+          "input source preserved through the round-trip");
+    CHECK(patches_equal(&pi, &qi), "input-edge patch round-trip is identical");
+
     /* ---- editability: a hand-edited decimal value parses ---- */
     const char *edited =
         "# my tweak\n"

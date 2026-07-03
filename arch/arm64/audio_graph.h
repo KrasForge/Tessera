@@ -21,15 +21,20 @@
 #define GRAPH_MAX_NODES 16
 #define GRAPH_MAX_EDGES 32
 
+/* Reserved node PIDs: the DAC sink is 0, the capture-input source is the max
+ * value (no plugin ever reaches it - pids start at 1 and increment). */
+#define GRAPH_INPUT_PID 0xFFFFFFFFu
+
 typedef enum {
     NODE_UNUSED = 0,
     NODE_PLUGIN,      /* an isolated plugin process            */
     NODE_DAC,         /* the output sink, always sorted last   */
+    NODE_INPUT,       /* the capture source (issue #84), never a dst */
 } node_type_t;
 
 typedef struct {
     node_type_t type;
-    uint32_t    pid;       /* plugin PID (0 for the DAC sink)  */
+    uint32_t    pid;       /* plugin PID (0 = DAC, GRAPH_INPUT_PID = input) */
 } graph_node_t;
 
 typedef struct {
@@ -45,6 +50,7 @@ typedef struct {
     int          n_nodes;
     int          n_edges;
     int          dac_node;                 /* index of the DAC, or -1 */
+    int          input_node;               /* index of the input source, or -1 */
     int        (*pid_valid)(uint32_t pid); /* optional PID validator  */
 } audio_graph_t;
 
@@ -61,15 +67,22 @@ int audio_graph_add_node(audio_graph_t *g, uint32_t pid);
  * exists or the graph is full. */
 int audio_graph_add_dac(audio_graph_t *g);
 
+/* Add the single capture-input source node (issue #84).  Returns its index,
+ * or -1 if one already exists or the graph is full.  It is a pure source: it
+ * may be an edge src but never a dst, the mirror image of the DAC. */
+int audio_graph_add_input(audio_graph_t *g);
+
 /* Connect producer `src` to consumer `dst` with an edge.  Returns the edge
  * index, or -1 on bad indices, a duplicate, or a full edge table.  The DAC
- * sink may be a dst but never a src. */
+ * sink may be a dst but never a src; the input source may be a src but never
+ * a dst. */
 int audio_graph_connect(audio_graph_t *g, int src, int dst);
 
 /* Attach the kernel-allocated ring buffer to an edge. */
 void audio_graph_set_edge_ring(audio_graph_t *g, int edge, void *ring);
 
-/* Node index for a plugin PID (or the DAC when pid == 0), or -1 if none. */
+/* Node index for a plugin PID (the DAC when pid == 0, the input source when
+ * pid == GRAPH_INPUT_PID), or -1 if none. */
 int audio_graph_node_by_pid(const audio_graph_t *g, uint32_t pid);
 
 /* Edge index for the src->dst pair, or -1 if there is no such edge. */

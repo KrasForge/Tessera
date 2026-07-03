@@ -391,6 +391,9 @@ jobs:
       - name: Runtime graph rewire via syscalls from EL0 on QEMU virt
         run: make test-arm-graph-ctl-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Capture input node end to end on QEMU virt (input -> filter -> DAC)
+        run: make test-arm-graph-input-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   control-syscall-tests:
     name: M7 control syscalls - param-queue host test + QEMU virt load/unload
     runs-on: ubuntu-22.04

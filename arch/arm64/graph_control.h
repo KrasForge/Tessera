@@ -63,6 +63,10 @@ void gc_set_on_change(graph_control_t *gc, void (*fn)(void *ctx), void *ctx);
 int gc_add_plugin(graph_control_t *gc, uint32_t pid);
 int gc_add_dac(graph_control_t *gc);
 
+/* Register the single capture-input source node (issue #84).  Wire it as an
+ * edge source (pid GRAPH_INPUT_PID) into any plugin or the DAC. */
+int gc_add_input(graph_control_t *gc);
+
 /* sys_graph_connect: wire src_pid -> dst_pid.  Allocates and maps a ring, adds
  * the edge.  Returns GC_OK or a negative GC_E* (GC_EEXIST for a duplicate). */
 int gc_connect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid);

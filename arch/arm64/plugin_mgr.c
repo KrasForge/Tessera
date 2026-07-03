@@ -253,9 +253,10 @@ int pm_capture_patch(plugin_mgr_t *m, patch_t *p)
             if (!m->gc->graph.edges[e].used) continue;
             uint32_t sp = m->gc->graph.nodes[m->gc->graph.edges[e].src].pid;
             uint32_t dp = m->gc->graph.nodes[m->gc->graph.edges[e].dst].pid;
-            int si = patch_index_of_pid(m, sp);
+            int si = (sp == GRAPH_INPUT_PID) ? PATCH_INPUT
+                                             : patch_index_of_pid(m, sp);
             int di = (dp == 0u) ? PATCH_DAC : patch_index_of_pid(m, dp);
-            if (si >= 0 && (di == PATCH_DAC || di >= 0))
+            if ((si == PATCH_INPUT || si >= 0) && (di == PATCH_DAC || di >= 0))
                 patch_add_edge(p, si, di);
         }
     }
@@ -282,9 +283,9 @@ int pm_apply_patch(plugin_mgr_t *m, const patch_t *p)
 
     for (int i = 0; i < p->n_edges; i++) {
         int si = p->edges[i].src, di = p->edges[i].dst;
-        if (si < 0 || si >= p->n_plugins) return PM_ENOENT;
+        if (si != PATCH_INPUT && (si < 0 || si >= p->n_plugins)) return PM_ENOENT;
         if (di != PATCH_DAC && (di < 0 || di >= p->n_plugins)) return PM_ENOENT;
-        uint32_t sp = pid_of[si];
+        uint32_t sp = (si == PATCH_INPUT) ? GRAPH_INPUT_PID : pid_of[si];
         uint32_t dp = (di == PATCH_DAC) ? 0u : pid_of[di];
         pm_connect(m, sp, dp);
     }
