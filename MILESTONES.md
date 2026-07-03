@@ -160,10 +160,11 @@ DAC, with measured round-trip latency published in
 
 ## Backlog (unscheduled)
 
-- **Legacy IKOS pruning** - `docs/implementation/` and `tests/` still carry
-  x86-era IKOS material (GUI, network stack, terminal, USB) that predates the
-  fork and misrepresents the project to new readers; prune it or move it under
-  a clearly-labelled legacy directory.
+- **Legacy IKOS pruning** - *done.* The pre-fork x86 IKOS teaching-OS tree
+  (`kernel/`, `user/`, the x86 bootloaders, the network stack, GUI, terminal,
+  USB, and their tests, headers, and docs) and the x86 half of the `Makefile`
+  were removed, leaving an ARM-only Tessera tree; `make` now defaults to the
+  ARM build. The history remains in git before the prune commit.
 - **`raspi4b` CI job** - once CI runners have QEMU >= 9.0, run the existing
   test suite against the BCM2711 machine as a permanent gate (feeds M10).
 - **SDK conformance tool** - ship the `make verify-plugin-abi` checks as a
