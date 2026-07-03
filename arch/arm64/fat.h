@@ -47,6 +47,10 @@ int fat_mount(fat_fs_t *fs, fat_read_block_fn read, void *ctx);
  * the file is missing or does not fit. */
 long fat_read_file(fat_fs_t *fs, const char *name, uint8_t *buf, uint32_t max);
 
+/* Enumerate the root directory (issue #82): call `cb(ctx, "NAME.EXT")` for
+ * each live file entry.  Returns the file count, or a negative read error. */
+int fat_list(fat_fs_t *fs, void (*cb)(void *ctx, const char *name), void *ctx);
+
 /* Enable writing by supplying a block-write callback (issue #40). */
 void fat_set_writer(fat_fs_t *fs, fat_write_block_fn write);
 

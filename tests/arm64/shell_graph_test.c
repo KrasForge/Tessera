@@ -80,11 +80,32 @@ static void m_stats(void *be, sg_stats_t *s)
     s->nodes[0].mean_us = 12; s->nodes[0].overruns = 0; s->nodes[0].offences = 0;
 }
 
+static struct {
+    int  save_calls; char save_path[64]; long save_ret;
+    int  load_calls; char load_pth[64];  long load_ret;
+    int  list_calls; int  list_ret;
+} P;
+
+static long m_patch_save(void *be, const char *p)
+{ (void)be; P.save_calls++; strncpy(P.save_path, p, 63); return P.save_ret; }
+static long m_patch_load(void *be, const char *p)
+{ (void)be; P.load_calls++; strncpy(P.load_pth, p, 63); return P.load_ret; }
+static int  m_patch_list(void *be, const char **names, int max)
+{
+    (void)be; P.list_calls++;
+    if (P.list_ret <= 0) return P.list_ret;
+    static const char *canned[] = { "LIVE.PAT", "DRONE.PAT" };
+    int n = P.list_ret < max ? P.list_ret : max;
+    for (int i = 0; i < n; i++) names[i] = canned[i % 2];
+    return n;
+}
+
 static const char *m_strerror(void *be, const char *verb, int code)
 {
     (void)be; (void)verb;
     switch (code) {
     case -1: return "no such file";
+    case -3: return "corrupt patch";
     case -5: return "ABI mismatch";
     default: return 0;              /* fall back to numeric */
     }
@@ -92,13 +113,17 @@ static const char *m_strerror(void *be, const char *verb, int code)
 
 static shell_graph_ops_t g_ops = {
     m_load, m_unload, m_wire, m_unwire, m_setparam,
-    m_describe, m_stats, m_strerror, 0
+    m_describe, m_stats,
+    m_patch_save, m_patch_load, m_patch_list,
+    m_strerror, 0
 };
 
 static void reset_all(shell_t *sh)
 {
     memset(&M, 0, sizeof M);
+    memset(&P, 0, sizeof P);
     M.load_ret = 7; M.unload_ret = 0; M.wire_ret = 0; M.unwire_ret = 0; M.sp_ret = 0;
+    P.save_ret = 0; P.load_ret = 0; P.list_ret = 2;
     shell_graph_install(sh, &g_ops);
     cap_reset();
 }
@@ -221,6 +246,47 @@ static void test_ls_stats(void)
           "stats shows per-plugin service times");
 }
 
+/* ---- patch save/load/ls ---- */
+static void test_patch(void)
+{
+    printf("- patch: save / load / ls, and error paths\n");
+    shell_t sh;
+    shell_init(&sh, 0, 0, cap_out, 0);
+
+    reset_all(&sh);
+    run(&sh, "patch save /sd/live.pat");
+    CHECK(P.save_calls == 1 && strcmp(P.save_path, "/sd/live.pat") == 0, "save path forwarded");
+    CHECK(saw("saved /sd/live.pat"), "save success line");
+
+    reset_all(&sh);
+    run(&sh, "patch load /sd/live.pat");
+    CHECK(P.load_calls == 1 && strcmp(P.load_pth, "/sd/live.pat") == 0, "load path forwarded");
+    CHECK(saw("loaded /sd/live.pat"), "load success line");
+
+    reset_all(&sh);
+    run(&sh, "patch ls");
+    CHECK(P.list_calls == 1 && saw("patches:") && saw("LIVE.PAT") && saw("DRONE.PAT"),
+          "ls lists the patch files");
+
+    reset_all(&sh);
+    P.list_ret = 0;
+    run(&sh, "patch ls");
+    CHECK(saw("(none)"), "empty patch list");
+
+    reset_all(&sh);
+    P.load_ret = -3;                        /* corrupt patch */
+    run(&sh, "patch load /sd/bad.pat");
+    CHECK(saw("error: patch load: corrupt patch"), "corrupt patch reported, no fault");
+
+    reset_all(&sh);
+    run(&sh, "patch save");                 /* missing path */
+    CHECK(P.save_calls == 0 && saw("usage: patch save"), "missing path -> usage");
+
+    reset_all(&sh);
+    run(&sh, "patch frob");                 /* unknown subcommand */
+    CHECK(saw("usage: patch"), "unknown subcommand -> usage");
+}
+
 int main(void)
 {
     printf("=== shell graph command host tests (issue #81) ===\n");
@@ -228,6 +294,7 @@ int main(void)
     test_verbs();
     test_errors();
     test_ls_stats();
+    test_patch();
 
     if (g_fail) {
         printf("SHELL-GRAPH TESTS: %d FAILURE(S)\n", g_fail);
