@@ -1058,7 +1058,8 @@ test-arm-i2s: | $(ARM_BUILD_DIR)
 VIRT_I2S_ELF  = $(ARM_BUILD_DIR)/virt_i2s.elf
 VIRT_I2S_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
                 $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/exceptions.c \
-                $(ARCH_ARM_DIR)/string.c drivers/i2s.c drivers/gpio.c
+                $(ARCH_ARM_DIR)/string.c drivers/i2s.c drivers/gpio.c \
+                drivers/dma.c
 
 test-arm-i2s-qemu: | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/i_start.o
@@ -1075,7 +1076,7 @@ test-arm-i2s-qemu: | $(ARM_BUILD_DIR)
 	    $(ARM_BUILD_DIR)/i_pmm.o $(ARM_BUILD_DIR)/i_mmu.o \
 	    $(ARM_BUILD_DIR)/i_vmem.o $(ARM_BUILD_DIR)/i_exceptions.o \
 	    $(ARM_BUILD_DIR)/i_string.o $(ARM_BUILD_DIR)/i_i2s.o \
-	    $(ARM_BUILD_DIR)/i_gpio.o
+	    $(ARM_BUILD_DIR)/i_gpio.o $(ARM_BUILD_DIR)/i_dma.o
 	rm -f $(ARM_BUILD_DIR)/virt_i2s.log
 	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
 	    -display none -serial file:$(ARM_BUILD_DIR)/virt_i2s.log -net none \
@@ -1084,6 +1085,54 @@ test-arm-i2s-qemu: | $(ARM_BUILD_DIR)
 	@grep -q "I2S-SMOKE: PASS" $(ARM_BUILD_DIR)/virt_i2s.log \
 	  && echo "QEMU virt I2S smoke test PASSED" \
 	  || { echo "QEMU virt I2S smoke test FAILED"; exit 1; }
+
+# Host unit tests for the I2S capture ring (issue #83): bit-exact FIFO capture,
+# wrap-around, drop-the-oldest overrun, silence-on-underrun, and the RX DMA
+# control-block encoding.  Pure C, ASan/UBSan.
+ARM_I2SRX_TEST_SRCS = tests/arm64/i2s_capture_test.c drivers/i2s_capture.c drivers/dma.c
+ARM_I2SRX_TEST_BIN  = $(ARM_BUILD_DIR)/i2s_capture_test
+
+test-arm-i2s-rx: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -Iinclude \
+	      $(ARM_I2SRX_TEST_SRCS) -o $(ARM_I2SRX_TEST_BIN)
+	$(ARM_I2SRX_TEST_BIN)
+
+# I2S capture on QEMU 'virt' (issue #83): the real RX driver + DMA setup
+# against scratch-mapped registers (no faults), plus a modelled capture source
+# driving the ring - bit-exact across wrap-around, drop-oldest overrun, and
+# silence on underrun.  MMU on.
+VIRT_I2SRX_ELF  = $(ARM_BUILD_DIR)/virt_i2s_rx.elf
+VIRT_I2SRX_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                  $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/exceptions.c \
+                  $(ARCH_ARM_DIR)/string.c drivers/i2s.c drivers/gpio.c \
+                  drivers/dma.c drivers/i2s_capture.c
+
+test-arm-i2s-rx-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/ir_start.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c   -o $(ARM_BUILD_DIR)/ir_uart.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -Iinclude -c $(VIRT_DIR)/i2s_rx_main.c -o $(ARM_BUILD_DIR)/ir_main.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S -o $(ARM_BUILD_DIR)/ir_vectors.o
+	for s in $(VIRT_I2SRX_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/ir_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_I2SRX_ELF) \
+	    $(ARM_BUILD_DIR)/ir_start.o $(ARM_BUILD_DIR)/ir_main.o \
+	    $(ARM_BUILD_DIR)/ir_uart.o $(ARM_BUILD_DIR)/ir_vectors.o \
+	    $(ARM_BUILD_DIR)/ir_pmm.o $(ARM_BUILD_DIR)/ir_mmu.o \
+	    $(ARM_BUILD_DIR)/ir_vmem.o $(ARM_BUILD_DIR)/ir_exceptions.o \
+	    $(ARM_BUILD_DIR)/ir_string.o $(ARM_BUILD_DIR)/ir_i2s.o \
+	    $(ARM_BUILD_DIR)/ir_gpio.o $(ARM_BUILD_DIR)/ir_dma.o \
+	    $(ARM_BUILD_DIR)/ir_i2s_capture.o
+	rm -f $(ARM_BUILD_DIR)/virt_i2s_rx.log
+	-timeout 20 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_i2s_rx.log -net none \
+	    -kernel $(VIRT_I2SRX_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_i2s_rx.log
+	@grep -q "I2S-RX: PASS" $(ARM_BUILD_DIR)/virt_i2s_rx.log \
+	  && echo "QEMU virt I2S capture test PASSED" \
+	  || { echo "QEMU virt I2S capture test FAILED"; exit 1; }
 
 # Host unit tests for DMA audio streaming (issue #17).
 ARM_AUDIO_TEST_SRCS = tests/arm64/audio_test.c drivers/dma.c drivers/audio.c

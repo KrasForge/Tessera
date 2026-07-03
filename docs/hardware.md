@@ -48,3 +48,28 @@ through an external SPI ADC, and the Gate is a digital GPIO input.
 Both MIDI and CV/Gate produce the same `midi_event_t` (tagged `INPUT_SRC_MIDI`
 or `INPUT_SRC_CV`) onto one lock-free event ring, so the host sees a single,
 unified stream of note/CC events regardless of the physical source.
+
+## Audio input (I2S ADC, issue #83)
+
+Live audio in, for the effects-pedal use case.  An external I2S ADC (e.g. a
+PCM1808) is wired to the **same** PCM peripheral that already drives the DAC,
+so capture shares BCLK and LRCLK with playback and is inherently sample-locked
+to it - no resampling, no drift.
+
+| PCM pin | GPIO (ALT0) | direction | to the ADC |
+|---------|-------------|-----------|------------|
+| PCM_CLK (BCLK) | 18 | output | BCK  |
+| PCM_FS (LRCLK) | 19 | output | LRCK |
+| PCM_DOUT       | 21 | output | (to the DAC) |
+| PCM_DIN        | 20 | input  | DOUT |
+
+- The DAC (PCM5102, output) and the ADC (input) share GPIO 18/19 as the master
+  clock and word clock; the DAC listens on GPIO 21 and the ADC drives GPIO 20.
+- The ADC needs a system/master clock (SCK/MCLK) at a multiple of the sample
+  rate; supply it from the board's oscillator or a GPIO clock output, per the
+  ADC's datasheet (the PCM5102 DAC needs none, but most ADCs do).
+- Capture streams through a DMA channel (paced by the PCM RX DREQ) into a
+  capture ring (`drivers/i2s_capture.c`), 48 kHz / 16-bit stereo.  A full ring
+  drops the oldest block and counts an overrun rather than stalling the audio
+  clock; the graph's input node (issue #84) consumes whole blocks, substituting
+  silence on underrun.

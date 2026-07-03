@@ -96,7 +96,9 @@ int16_t i2s_sine(uint32_t *phase, uint32_t freq, uint32_t rate)
 #define CS_TXON   (1u << 2)
 #define CS_TXCLR  (1u << 3)
 #define CS_RXCLR  (1u << 4)
+#define CS_DMAEN  (1u << 9)        /* enable DMA DREQ generation */
 #define CS_TXD    (1u << 19)       /* TX FIFO can accept data */
+#define CS_RXD    (1u << 20)       /* RX FIFO contains data */
 #define CS_SYNC   (1u << 24)
 
 /* MODE_A bits */
@@ -204,6 +206,63 @@ void i2s_play_tone(uint32_t freq, uint32_t count)
         int16_t s = i2s_sine(&phase, freq, rate);
         i2s_write_stereo(s, s);
     }
+}
+
+/* ---- capture / RX (issue #83) --------------------------------------- */
+
+#include "dma.h"
+
+void i2s_capture_enable(void)
+{
+    /* GPIO 20 = PCM_DIN (ALT0); BCLK/LRCLK were already muxed by i2s_init. */
+    gpio_set_function(20, GPIO_FUNC_ALT0);
+
+    /* RX channel config: two 16-bit channels, same layout as TX. */
+    uint32_t wid = g_bits - 8;                        /* 8 for 16-bit */
+    uint32_t ch1_pos = 1;
+    uint32_t ch2_pos = 1 + g_bits;
+    PCM_RXC_A = (1u << 31) | (ch2_pos << 20) | (wid << 16) |
+                (1u << 14) | (ch1_pos << 4) | wid;
+
+    /* RX DREQ threshold for DMA pacing (RX request level in bits [15:8]). */
+    PCM_DREQ_A = (PCM_DREQ_A & ~(0xFFu << 8)) | (0x20u << 8);
+
+    /* Clear the RX FIFO, then enable RX alongside the running TX. */
+    uint32_t cs = PCM_CS_A;
+    PCM_CS_A = cs | CS_RXCLR;
+    delay(1000);
+    PCM_CS_A = (cs & ~CS_RXCLR) | CS_RXON;
+}
+
+int i2s_read_stereo(int16_t *left, int16_t *right)
+{
+    int spin = 100000;
+    while (!(PCM_CS_A & CS_RXD) && --spin > 0)
+        ;
+    if (spin <= 0)
+        return -1;
+    *left = (int16_t)(uint16_t)PCM_FIFO_A;
+
+    spin = 100000;
+    while (!(PCM_CS_A & CS_RXD) && --spin > 0)
+        ;
+    if (spin <= 0)
+        return -1;
+    *right = (int16_t)(uint16_t)PCM_FIFO_A;
+    return 0;
+}
+
+void i2s_capture_dma_start(int channel, uint32_t cb_bus, void *cb,
+                           uint32_t buf_bus, uint32_t len_bytes)
+{
+    /* Peripheral source = the PCM RX FIFO's bus address. */
+    uint32_t fifo_bus = dma_bus_periph(PCM_BASE + 0x04);
+    dma_audio_rx_cb_init((dma_cb_t *)cb, fifo_bus, buf_bus, len_bytes, cb_bus);
+
+    /* Let the PCM block raise DMA DREQs, then run the channel. */
+    PCM_CS_A |= CS_DMAEN;
+    dma_init_channel(channel);
+    dma_start(channel, cb_bus);
 }
 
 #endif /* !HOSTTEST */

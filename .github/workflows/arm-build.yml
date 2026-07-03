@@ -96,6 +96,12 @@ jobs:
       - name: I2S API smoke on QEMU virt (no faults)
         run: make test-arm-i2s-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: I2S capture ring host unit tests (bit-exact + overrun, ASan + UBSan)
+        run: make test-arm-i2s-rx
+
+      - name: I2S capture on QEMU virt (RX setup + modelled source)
+        run: make test-arm-i2s-rx-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
       - name: DMA double-buffer host unit tests (ASan + UBSan)
         run: make test-arm-audio
 

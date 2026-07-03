@@ -29,12 +29,15 @@ typedef struct __attribute__((aligned(32))) {
 /* Transfer-information (TI) bits. */
 #define DMA_TI_INTEN        (1u << 0)
 #define DMA_TI_WAIT_RESP    (1u << 3)
+#define DMA_TI_DEST_INC     (1u << 4)   /* RX: increment the RAM destination */
 #define DMA_TI_DEST_DREQ    (1u << 6)
 #define DMA_TI_SRC_INC      (1u << 8)
+#define DMA_TI_SRC_DREQ     (1u << 10)  /* RX: source paced by the FIFO DREQ */
 #define DMA_TI_PERMAP_SHIFT 16
 
-/* DREQ (pacing) peripheral number for the PCM/I2S TX FIFO. */
+/* DREQ (pacing) peripheral numbers for the PCM/I2S FIFOs. */
 #define DMA_DREQ_PCM_TX     2u
+#define DMA_DREQ_PCM_RX     3u
 
 /* ---- pure helpers (host-testable) ----------------------------------- */
 
@@ -55,6 +58,12 @@ static inline uint32_t dma_bus_periph(uint64_t phys)
  * completion interrupt, then chaining to `next_bus`. */
 void dma_audio_cb_init(dma_cb_t *cb, uint32_t src_bus, uint32_t dst_bus,
                        uint32_t len_bytes, uint32_t next_bus);
+
+/* Initialise a capture control block that streams `len_bytes` from the PCM RX
+ * FIFO (paced by its DREQ) into a RAM buffer (incrementing), raising the
+ * completion interrupt, then chaining to `next_bus` (issue #83). */
+void dma_audio_rx_cb_init(dma_cb_t *cb, uint32_t src_bus, uint32_t dst_bus,
+                          uint32_t len_bytes, uint32_t next_bus);
 
 /* ---- MMIO driver ---------------------------------------------------- */
 
