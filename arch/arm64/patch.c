@@ -131,7 +131,7 @@ int patch_add_param(patch_t *p, int plugin, uint32_t id, uint32_t bits)
 int patch_add_edge(patch_t *p, int src, int dst)
 {
     if (p->n_edges >= PATCH_MAX_EDGES) return PATCH_ERANGE;
-    if (src < 0 || src >= p->n_plugins) return PATCH_ERANGE;
+    if (src != PATCH_INPUT && (src < 0 || src >= p->n_plugins)) return PATCH_ERANGE;
     if (dst != PATCH_DAC && (dst < 0 || dst >= p->n_plugins)) return PATCH_ERANGE;
     p->edges[p->n_edges].src = src;
     p->edges[p->n_edges].dst = dst;
@@ -166,10 +166,13 @@ long patch_serialize(const patch_t *p, char *out, uint32_t max)
     }
 
     for (int i = 0; i < p->n_edges; i++) {
-        if (put(out, &pos, max, "connect ") ||
-            put_uint(out, &pos, max, (uint32_t)p->edges[i].src) ||
-            put(out, &pos, max, " "))
+        if (put(out, &pos, max, "connect ")) return PATCH_ENOSPACE;
+        if (p->edges[i].src == PATCH_INPUT) {
+            if (put(out, &pos, max, "input")) return PATCH_ENOSPACE;
+        } else if (put_uint(out, &pos, max, (uint32_t)p->edges[i].src)) {
             return PATCH_ENOSPACE;
+        }
+        if (put(out, &pos, max, " ")) return PATCH_ENOSPACE;
         if (p->edges[i].dst == PATCH_DAC) {
             if (put(out, &pos, max, "dac")) return PATCH_ENOSPACE;
         } else if (put_uint(out, &pos, max, (uint32_t)p->edges[i].dst)) {
@@ -249,9 +252,14 @@ int patch_parse(const char *in, uint32_t len, patch_t *p)
         } else if (streq(kw, "connect")) {
             if (token(in, &i, len, a, sizeof(a)) == 0) return PATCH_ETRUNC;
             if (token(in, &i, len, b, sizeof(b)) == 0) return PATCH_ETRUNC;
-            uint32_t si;
-            int di;
-            if (parse_uint(a, &si) != PATCH_OK) return PATCH_EFMT;
+            int si, di;
+            if (streq(a, "input")) {
+                si = PATCH_INPUT;
+            } else {
+                uint32_t s;
+                if (parse_uint(a, &s) != PATCH_OK) return PATCH_EFMT;
+                si = (int)s;
+            }
             if (streq(b, "dac")) {
                 di = PATCH_DAC;
             } else {
@@ -259,7 +267,7 @@ int patch_parse(const char *in, uint32_t len, patch_t *p)
                 if (parse_uint(b, &d) != PATCH_OK) return PATCH_EFMT;
                 di = (int)d;
             }
-            if (patch_add_edge(p, (int)si, di) < 0) return PATCH_ERANGE;
+            if (patch_add_edge(p, si, di) < 0) return PATCH_ERANGE;
         } else {
             return PATCH_EFMT;            /* unknown keyword */
         }

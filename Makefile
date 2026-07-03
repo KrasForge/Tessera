@@ -1841,6 +1841,61 @@ test-arm-graph-ctl-qemu: $(ARM_BUILD_DIR)/plugin_controller.elf
 	  && echo "QEMU virt graph-control test PASSED" \
 	  || { echo "QEMU virt graph-control test FAILED"; exit 1; }
 
+# The capture input node end to end on QEMU 'virt' (issue #84): MMU on, single
+# core.  The input node pulls captured blocks from the I2S capture ring and is
+# wired through the control plane: input -> filter -> DAC carries audio,
+# input -> DAC is bit-exact against the capture, an empty ring underruns to
+# silence, and a patch containing the input node saves to the FAT SD card,
+# reloads, and rebuilds the identical graph.
+VIRT_GIN_ELF  = $(ARM_BUILD_DIR)/virt_graph_input.elf
+VIRT_GIN_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+                $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+                $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+                $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+                $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+                $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+                $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c \
+                $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c \
+                $(ARCH_ARM_DIR)/sandbox.c $(ARCH_ARM_DIR)/string.c \
+                drivers/i2s_capture.c
+
+test-arm-graph-input-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/gi_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/gi_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/gi_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/gi_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/graph_input_blob.S     -o $(ARM_BUILD_DIR)/gi_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/gi_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iinclude -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/graph_input_main.c -o $(ARM_BUILD_DIR)/gi_main.o
+	$(ARM_CC) $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding -fno-pic -fno-pie -O2 -std=c11 -Iinclude -c $(VIRT_DIR)/gi_conv.c -o $(ARM_BUILD_DIR)/gi_conv.o
+	for s in $(VIRT_GIN_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/gi_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -Iinclude -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_GIN_ELF) \
+	    $(ARM_BUILD_DIR)/gi_start.o $(ARM_BUILD_DIR)/gi_main.o \
+	    $(ARM_BUILD_DIR)/gi_uart.o $(ARM_BUILD_DIR)/gi_vectors.o \
+	    $(ARM_BUILD_DIR)/gi_entry.o $(ARM_BUILD_DIR)/gi_tramp.o \
+	    $(ARM_BUILD_DIR)/gi_blob.o \
+	    $(ARM_BUILD_DIR)/gi_pmm.o $(ARM_BUILD_DIR)/gi_mmu.o \
+	    $(ARM_BUILD_DIR)/gi_vmem.o $(ARM_BUILD_DIR)/gi_process.o \
+	    $(ARM_BUILD_DIR)/gi_exceptions.o $(ARM_BUILD_DIR)/gi_syscalls.o \
+	    $(ARM_BUILD_DIR)/gi_elf64.o $(ARM_BUILD_DIR)/gi_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/gi_audio_ringbuf.o $(ARM_BUILD_DIR)/gi_audio_graph.o \
+	    $(ARM_BUILD_DIR)/gi_graph_control.o $(ARM_BUILD_DIR)/gi_param_queue.o \
+	    $(ARM_BUILD_DIR)/gi_plugin_mgr.o $(ARM_BUILD_DIR)/gi_patch.o \
+	    $(ARM_BUILD_DIR)/gi_vfs.o $(ARM_BUILD_DIR)/gi_fat.o \
+	    $(ARM_BUILD_DIR)/gi_sandbox.o $(ARM_BUILD_DIR)/gi_string.o \
+	    $(ARM_BUILD_DIR)/gi_i2s_capture.o $(ARM_BUILD_DIR)/gi_conv.o
+	rm -f $(ARM_BUILD_DIR)/virt_graph_input.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_graph_input.log -net none \
+	    -kernel $(VIRT_GIN_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_graph_input.log
+	@grep -q "GRAPH-INPUT: PASS" $(ARM_BUILD_DIR)/virt_graph_input.log \
+	  && echo "QEMU virt graph-input test PASSED" \
+	  || { echo "QEMU virt graph-input test FAILED"; exit 1; }
+
 # ---- M7: live parameter changes (issue #33) -------------------------------
 # Integration host test: CC -> param map -> lock-free queue -> filter, checking
 # click-free modulation, overflow handling, and latency.  Uses libm for the

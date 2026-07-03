@@ -33,11 +33,13 @@
 #define PATCH_MAX_EDGES   32
 #define PATCH_PATH_MAX    64
 
-#define PATCH_DAC (-1)     /* edge destination: the DAC sink (pid 0) */
+#define PATCH_DAC   (-1)   /* edge destination: the DAC sink (pid 0)        */
+#define PATCH_INPUT (-2)   /* edge source: the capture input (issue #84)    */
 
 typedef struct { char path[PATCH_PATH_MAX]; } patch_plugin_t;
 typedef struct { int plugin; uint32_t id; uint32_t bits; } patch_param_t;
-typedef struct { int src; int dst; } patch_edge_t;   /* dst may be PATCH_DAC */
+/* src may be a plugin index or PATCH_INPUT; dst a plugin index or PATCH_DAC. */
+typedef struct { int src; int dst; } patch_edge_t;
 
 typedef struct {
     patch_plugin_t plugins[PATCH_MAX_PLUGINS];

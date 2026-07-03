@@ -10,10 +10,11 @@ void audio_graph_init(audio_graph_t *g, int (*validator)(uint32_t pid))
     }
     for (int i = 0; i < GRAPH_MAX_EDGES; i++)
         g->edges[i].used = 0;
-    g->n_nodes   = 0;
-    g->n_edges   = 0;
-    g->dac_node  = -1;
-    g->pid_valid = validator;
+    g->n_nodes    = 0;
+    g->n_edges    = 0;
+    g->dac_node   = -1;
+    g->input_node = -1;
+    g->pid_valid  = validator;
 }
 
 static int alloc_node(audio_graph_t *g)
@@ -59,6 +60,22 @@ int audio_graph_add_dac(audio_graph_t *g)
     return i;
 }
 
+int audio_graph_add_input(audio_graph_t *g)
+{
+    if (g->input_node >= 0)
+        return -1;                 /* only one capture source */
+
+    int i = alloc_node(g);
+    if (i < 0)
+        return -1;
+
+    g->nodes[i].type = NODE_INPUT;
+    g->nodes[i].pid  = GRAPH_INPUT_PID;
+    g->n_nodes++;
+    g->input_node = i;
+    return i;
+}
+
 static int node_live(const audio_graph_t *g, int n)
 {
     return n >= 0 && n < GRAPH_MAX_NODES && g->nodes[n].type != NODE_UNUSED;
@@ -68,8 +85,11 @@ int audio_graph_connect(audio_graph_t *g, int src, int dst)
 {
     if (!node_live(g, src) || !node_live(g, dst) || src == dst)
         return -1;
-    /* The DAC is a pure sink: it can be a destination but never a source. */
+    /* The DAC is a pure sink (never a source); the input is a pure source
+     * (never a destination). */
     if (g->nodes[src].type == NODE_DAC)
+        return -1;
+    if (g->nodes[dst].type == NODE_INPUT)
         return -1;
 
     for (int e = 0; e < GRAPH_MAX_EDGES; e++)
@@ -102,7 +122,10 @@ int audio_graph_node_by_pid(const audio_graph_t *g, uint32_t pid)
             continue;
         if (pid == 0 && g->nodes[i].type == NODE_DAC)
             return i;
-        if (pid != 0 && g->nodes[i].type == NODE_PLUGIN && g->nodes[i].pid == pid)
+        if (pid == GRAPH_INPUT_PID && g->nodes[i].type == NODE_INPUT)
+            return i;
+        if (pid != 0 && pid != GRAPH_INPUT_PID &&
+            g->nodes[i].type == NODE_PLUGIN && g->nodes[i].pid == pid)
             return i;
     }
     return -1;
@@ -140,6 +163,8 @@ void audio_graph_remove_node(audio_graph_t *g, int n)
         }
     if (g->dac_node == n)
         g->dac_node = -1;
+    if (g->input_node == n)
+        g->input_node = -1;
     g->nodes[n].type = NODE_UNUSED;
     g->nodes[n].pid  = 0;
     g->n_nodes--;
