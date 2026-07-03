@@ -1896,6 +1896,63 @@ test-arm-graph-input-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf
 	  && echo "QEMU virt graph-input test PASSED" \
 	  || { echo "QEMU virt graph-input test FAILED"; exit 1; }
 
+# The round-trip latency demo on QEMU 'virt' (issue #85): MMU on, single core.
+# The real graph (input -> filter -> DAC) runs with a one-block capture ring and
+# a one-block DAC-output ring, and a modelled loopback feeds the DAC output back
+# into the capture source.  A DC step injected at the start travels the whole
+# loop; CNTPCT_EL0 timestamps a block at the capture edge and at the DAC output,
+# and the harness asserts the per-block delay is exactly 2 (the buffer-
+# accounting prediction) and reports min/max/mean round-trip microseconds.
+VIRT_RT_ELF  = $(ARM_BUILD_DIR)/virt_roundtrip.elf
+VIRT_RT_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+               $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+               $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+               $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+               $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+               $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c \
+               $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c \
+               $(ARCH_ARM_DIR)/sandbox.c $(ARCH_ARM_DIR)/string.c \
+               $(ARCH_ARM_DIR)/latency.c drivers/i2s_capture.c
+
+test-arm-roundtrip-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/rt_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/rt_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/rt_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/rt_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/roundtrip_blob.S       -o $(ARM_BUILD_DIR)/rt_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/rt_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iinclude -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/roundtrip_main.c -o $(ARM_BUILD_DIR)/rt_main.o
+	$(ARM_CC) $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding -fno-pic -fno-pie -O2 -std=c11 -Iinclude -c $(VIRT_DIR)/rt_conv.c -o $(ARM_BUILD_DIR)/rt_conv.o
+	for s in $(VIRT_RT_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/rt_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -Iinclude -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_RT_ELF) \
+	    $(ARM_BUILD_DIR)/rt_start.o $(ARM_BUILD_DIR)/rt_main.o \
+	    $(ARM_BUILD_DIR)/rt_uart.o $(ARM_BUILD_DIR)/rt_vectors.o \
+	    $(ARM_BUILD_DIR)/rt_entry.o $(ARM_BUILD_DIR)/rt_tramp.o \
+	    $(ARM_BUILD_DIR)/rt_blob.o \
+	    $(ARM_BUILD_DIR)/rt_pmm.o $(ARM_BUILD_DIR)/rt_mmu.o \
+	    $(ARM_BUILD_DIR)/rt_vmem.o $(ARM_BUILD_DIR)/rt_process.o \
+	    $(ARM_BUILD_DIR)/rt_exceptions.o $(ARM_BUILD_DIR)/rt_syscalls.o \
+	    $(ARM_BUILD_DIR)/rt_elf64.o $(ARM_BUILD_DIR)/rt_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/rt_audio_ringbuf.o $(ARM_BUILD_DIR)/rt_audio_graph.o \
+	    $(ARM_BUILD_DIR)/rt_graph_control.o $(ARM_BUILD_DIR)/rt_param_queue.o \
+	    $(ARM_BUILD_DIR)/rt_plugin_mgr.o $(ARM_BUILD_DIR)/rt_patch.o \
+	    $(ARM_BUILD_DIR)/rt_vfs.o $(ARM_BUILD_DIR)/rt_fat.o \
+	    $(ARM_BUILD_DIR)/rt_sandbox.o $(ARM_BUILD_DIR)/rt_string.o \
+	    $(ARM_BUILD_DIR)/rt_latency.o $(ARM_BUILD_DIR)/rt_i2s_capture.o \
+	    $(ARM_BUILD_DIR)/rt_conv.o
+	rm -f $(ARM_BUILD_DIR)/virt_roundtrip.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_roundtrip.log -net none \
+	    -kernel $(VIRT_RT_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_roundtrip.log
+	@grep -q "ROUNDTRIP: PASS" $(ARM_BUILD_DIR)/virt_roundtrip.log \
+	  && echo "QEMU virt round-trip test PASSED" \
+	  || { echo "QEMU virt round-trip test FAILED"; exit 1; }
+
 # ---- M7: live parameter changes (issue #33) -------------------------------
 # Integration host test: CC -> param map -> lock-free queue -> filter, checking
 # click-free modulation, overflow handling, and latency.  Uses libm for the
