@@ -306,6 +306,56 @@ void  tessera_fx_reverb_init(tessera_fx_reverb_t *r,
                              float feedback, float damp, float mix);
 float tessera_fx_reverb(tessera_fx_reverb_t *r, float x);
 
+/* ---- polyphonic synth voice engine (libtessera.a, Theme B, issue #113) --- *
+ * The ABI (v1.1) delivers note events into a plugin; this turns them into audio
+ * - a voice allocator over the SDK's oscillators and ADSR that proves the
+ * synth-voice path end to end.  Real-time safe: no libc, no allocation, and
+ * per-sample cost bounded by the (fixed) voice count.  The caller owns the voice
+ * array, so polyphony is chosen at the call site. */
+typedef enum {
+    TESSERA_WAVE_SINE = 0, TESSERA_WAVE_SAW, TESSERA_WAVE_SQUARE, TESSERA_WAVE_TRIANGLE
+} tessera_wave_t;
+
+typedef struct {
+    tessera_osc_t  osc;
+    tessera_adsr_t adsr;
+    int      active;   /* 1 while sounding (through release)  */
+    int      note;     /* MIDI note, or -1 when free          */
+    float    gain;     /* velocity / 127                      */
+    uint32_t born;     /* allocation order, for voice stealing*/
+} tessera_voice_t;
+
+typedef struct {
+    tessera_voice_t *voices;
+    int      n_voices;
+    float    sr;
+    tessera_wave_t waveform;
+    float    a_ms, d_ms, sustain, r_ms;   /* current patch envelope   */
+    uint32_t age;                          /* monotonic alloc counter  */
+} tessera_synth_t;
+
+/* MIDI note -> frequency in Hz (equal temperament, A4 = note 69 = 440 Hz). */
+float tessera_note_to_hz(int note);
+
+/* Initialise a synth over a caller-supplied voice array (default sine, a mild
+ * envelope).  n_voices sets the polyphony. */
+void  tessera_synth_init(tessera_synth_t *s, tessera_voice_t *voices,
+                         int n_voices, float sr);
+/* Choose the waveform and ADSR patch applied to newly-triggered notes. */
+void  tessera_synth_set (tessera_synth_t *s, tessera_wave_t waveform,
+                         float a_ms, float d_ms, float sustain, float r_ms);
+/* Note on (velocity 0 is treated as note-off); allocates a free voice or steals
+ * the quietest.  Note off releases every voice sounding that note. */
+void  tessera_synth_note_on (tessera_synth_t *s, int note, int velocity);
+void  tessera_synth_note_off(tessera_synth_t *s, int note);
+/* Apply a decoded ABI note event (NOTE_ON / NOTE_OFF; others ignored). */
+void  tessera_synth_event(tessera_synth_t *s, const tessera_note_event_t *ev);
+/* Render one summed sample across all voices; reclaims voices whose release has
+ * completed.  The caller scales/limits the mix for its output. */
+float tessera_synth_render(tessera_synth_t *s);
+/* Count of currently-sounding voices (for meters / tests). */
+int   tessera_synth_active(const tessera_synth_t *s);
+
 /* ---- IR convolution (libtessera.a, Theme B, issue #112) ------------------ *
  * A time-domain FIR: convolve the signal against an impulse response (a guitar
  * cabinet, a room, a filter kernel).  Deliberately the heavy building block - a

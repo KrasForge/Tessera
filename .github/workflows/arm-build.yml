@@ -618,6 +618,9 @@ jobs:
       - name: SDK IR-convolution host unit tests (cabinet-sim engine, ASan + UBSan)
         run: make test-arm-conv
 
+      - name: SDK polyphonic-synth host unit tests (voices/note-events/stealing, ASan + UBSan)
+        run: make test-arm-synth
+
       - name: Build the example plugin using ONLY the SDK
         run: make -C sdk/examples/sine_plugin CROSS_COMPILE=aarch64-linux-gnu-
 
