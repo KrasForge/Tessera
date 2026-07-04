@@ -101,3 +101,32 @@ next Bank Select, and an out-of-range Bank Select is ignored rather than switchi
 to a bank that does not exist.
 
 Covered by `make test-arm-bank`.
+
+## Desktop / remote editor over OSC (issue #123)
+
+Patches can also be built from a laptop over USB serial or OSC. `arch/arm64/osc.c`
+is the wire format: an Open Sound Control 1.0 message codec (address pattern +
+type-tag string + big-endian arguments) plus a thin dispatch that turns editor
+messages into the same parameter and graph edits the on-device shell performs:
+
+| Address                | Type tags | Command                                  |
+|------------------------|-----------|------------------------------------------|
+| `/tessera/param`       | `,iii` / `,iif` | set plugin/param to a value (bit pattern) |
+| `/tessera/connect`     | `,ii`     | connect src -> dst                       |
+| `/tessera/disconnect`  | `,ii`     | disconnect src -> dst                    |
+| `/tessera/load`        | `,s`      | load a patch file                        |
+| `/tessera/save`        | `,s`      | save the current patch                   |
+| `/tessera/ping`        | (none)    | liveness check                           |
+
+OSC carries 32-bit floats, but the kernel builds `-mgeneral-regs-only` (no FP), so
+a float argument is handled as its raw 32-bit IEEE-754 **bit pattern** (type `f`,
+kept in a `uint32`) - never as a float, and no arithmetic is done on it - exactly
+as the patch file format stores parameter values. The `,iii` form passes the same
+bit pattern as an int, so a host with no float support can drive it too.
+
+The parser is fed untrusted bytes from an external tool, so every field is
+bounds-checked against the buffer: packets must be 4-byte aligned, the address
+must start with `/` and be NUL-terminated within bounds, and a truncated or
+over-long argument list is rejected rather than read past the end.
+
+Covered by `make test-arm-osc`.
