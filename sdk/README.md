@@ -31,6 +31,27 @@ Tessera kernel sources or headers are required.
 
 Declarations and doc comments are in [`tessera.h`](tessera.h); the blocks are
 unit-tested by `make test-arm-dsp`.
+
+### Reference effects suite
+
+On top of those primitives, `libtessera.a` also ships a suite of complete
+effects, so a pedal or channel-strip plugin can drop one in without wiring the
+DSP by hand (still allocation-free and libc-free):
+
+- **`tessera_fx_overdrive`** - a stateless soft-clipping waveshaper (drive + level).
+- **`tessera_fx_comp_*`** - a feed-forward compressor (threshold, ratio, makeup,
+  attack/release).
+- **`tessera_fx_eq3_*`** - a 3-band EQ (low shelf, peaking mid, high shelf).
+- **`tessera_fx_delay_*`** - a delay with feedback and a wet/dry mix (drive the
+  delay time from the transport for tempo sync).
+- **`tessera_fx_chorus_*`** - an LFO-modulated delay.
+- **`tessera_fx_gate_*`** - a noise gate with a smoothed open/close.
+- **`tessera_fx_reverb_*`** - a Schroeder reverb (4 damped combs into 2 allpasses).
+- **`tessera_fx_tuner_*`** / **`tessera_fx_note_of`** - a zero-crossing pitch
+  estimator with a Hz -> nearest-note/cents mapping.
+
+Declarations and doc comments are in [`tessera.h`](tessera.h); the suite is
+unit-tested by `make test-arm-fx`.
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |
