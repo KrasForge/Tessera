@@ -38,8 +38,10 @@ int audio_graph_add_node(audio_graph_t *g, uint32_t pid)
     if (i < 0)
         return -1;
 
-    g->nodes[i].type = NODE_PLUGIN;
-    g->nodes[i].pid  = pid;
+    g->nodes[i].type   = NODE_PLUGIN;
+    g->nodes[i].pid    = pid;
+    g->nodes[i].in_ch  = 2;
+    g->nodes[i].out_ch = 2;
     g->n_nodes++;
     return i;
 }
@@ -53,8 +55,10 @@ int audio_graph_add_dac(audio_graph_t *g)
     if (i < 0)
         return -1;
 
-    g->nodes[i].type = NODE_DAC;
-    g->nodes[i].pid  = 0;
+    g->nodes[i].type   = NODE_DAC;
+    g->nodes[i].pid    = 0;
+    g->nodes[i].in_ch  = 2;
+    g->nodes[i].out_ch = 2;
     g->n_nodes++;
     g->dac_node = i;
     return i;
@@ -69,8 +73,10 @@ int audio_graph_add_input(audio_graph_t *g)
     if (i < 0)
         return -1;
 
-    g->nodes[i].type = NODE_INPUT;
-    g->nodes[i].pid  = GRAPH_INPUT_PID;
+    g->nodes[i].type   = NODE_INPUT;
+    g->nodes[i].pid    = GRAPH_INPUT_PID;
+    g->nodes[i].in_ch  = 2;
+    g->nodes[i].out_ch = 2;
     g->n_nodes++;
     g->input_node = i;
     return i;
@@ -96,18 +102,44 @@ static int connect_ex(audio_graph_t *g, int src, int dst, int feedback)
         if (g->edges[e].used && g->edges[e].src == src && g->edges[e].dst == dst)
             return -1;             /* duplicate edge */
 
+    /* Channel compatibility: the producer's output width must match the
+     * consumer's input width.  Stereo defaults (2/2) always match, so existing
+     * graphs are unaffected; a multi-channel plugin only wires to a matching
+     * one. */
+    if (g->nodes[src].out_ch != g->nodes[dst].in_ch)
+        return -1;
+
     for (int e = 0; e < GRAPH_MAX_EDGES; e++) {
         if (!g->edges[e].used) {
             g->edges[e].used     = 1;
             g->edges[e].src      = src;
             g->edges[e].dst      = dst;
             g->edges[e].feedback = feedback;
+            g->edges[e].channels = g->nodes[src].out_ch;
             g->edges[e].ring     = (void *)0;
             g->n_edges++;
             return e;
         }
     }
     return -1;                      /* edge table full */
+}
+
+void audio_graph_set_channels(audio_graph_t *g, int node, uint16_t in_ch, uint16_t out_ch)
+{
+    if (!node_live(g, node))
+        return;
+    /* A count of 0 leaves that side unchanged, so callers can set just one. */
+    if (in_ch)
+        g->nodes[node].in_ch = in_ch;
+    if (out_ch)
+        g->nodes[node].out_ch = out_ch;
+}
+
+uint16_t audio_graph_edge_channels(const audio_graph_t *g, int e)
+{
+    if (e < 0 || e >= GRAPH_MAX_EDGES || !g->edges[e].used)
+        return 0;
+    return g->edges[e].channels;
 }
 
 int audio_graph_connect(audio_graph_t *g, int src, int dst)
