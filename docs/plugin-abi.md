@@ -402,3 +402,38 @@ concrete layout (`tessera_event_queue_t`, `tessera_note_event_t`,
 in [`sdk/tessera.h`](../sdk/tessera.h); the drain (`tessera_event_read`) and the
 transport read are in `libtessera.a`. Reading the queue obeys the same real-time
 rules as everything else in `process_block`: it is wait-free and allocation-free.
+
+## Embedded presets and config negotiation (Theme F, issue #127)
+
+Two pieces of plugin self-description the host reads at load, both parsed by
+`arch/arm64/presets.c`.
+
+### Embedded presets
+
+A plugin can ship factory presets *inside its ELF*, in a `.tessera.presets`
+section, so an author does not have to distribute a separate preset file. The
+section is a small blob: a header (`'TPRE'` magic, version, preset count) followed
+by named presets, each a list of `{param_id, value_bits}` pairs. Values are stored
+as 32-bit IEEE-754 bit patterns (like the patch format), so the kernel reads them
+with no floating point.
+
+The blob comes from an untrusted plugin file, so the parser bounds-checks every
+field against the section length: a short header, a bad magic or version, or a
+preset whose parameter list runs past the section are all rejected rather than
+over-read. The host walks the presets (`presets_open` / `presets_get` /
+`preset_param`) and applies one by enqueuing its parameters on the plugin's
+parameter queue.
+
+### Sample-rate / block-size negotiation
+
+A plugin advertises the sample rates and block sizes it supports as a
+`plugin_caps_t` (a rate list — empty means "any" — and an inclusive block-size
+range). `caps_negotiate` compares the host's rate/block against it:
+
+- If the host's config is directly acceptable, it is used verbatim (returns 1).
+- Otherwise negotiation suggests the plugin's nearest workable config — the
+  closest supported rate, and the host block clamped into `[block_min, block_max]`
+  — and returns 0, so the host can resample / re-buffer to bridge the gap or
+  reject the plugin.
+
+Covered by `make test-arm-presets`.

@@ -642,6 +642,9 @@ jobs:
       - name: Rust plugin SDK - gain plugin through the generated C ABI (cargo test)
         run: make test-rust-sdk
 
+      - name: Embedded-presets / config-negotiation host unit tests (parse + negotiate, ASan + UBSan)
+        run: make test-arm-presets
+
       - name: Build the example plugin using ONLY the SDK
         run: make -C sdk/examples/sine_plugin CROSS_COMPILE=aarch64-linux-gnu-
 
