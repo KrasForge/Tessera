@@ -437,3 +437,28 @@ range). `caps_negotiate` compares the host's rate/block against it:
   reject the plugin.
 
 Covered by `make test-arm-presets`.
+
+## ABI v1.2: per-note (MPE) expression (Theme M17, issue #171)
+
+v1.1 delivers channel-voice note/CC events; v1.2 adds **per-note expression** so a
+synth can voice each note independently - the heart of MPE and MIDI 2.0. Three new
+event kinds ride the same event queue:
+
+- `TESSERA_EV_PITCH` - per-note pitch bend, in the event's `value` field
+  (`-8192..+8191`, a signed 14-bit bend). The synth scales it by its bend range
+  (default ±48 semitones, the MPE convention) and retunes just that voice.
+- `TESSERA_EV_PRESSURE` - per-note pressure (`data2`, 0..127), scaling the voice
+  level.
+- `TESSERA_EV_TIMBRE` - per-note timbre / CC 74 (`data2`), reserved for a timbral
+  mapping.
+
+The event struct grows to 8 bytes to carry the high-resolution `value`
+(NOTE_ON/OFF/CC still use only the first four bytes, so existing handlers are
+unchanged). The minor version bump keeps older plugins compatible per
+`tessera_abi_compatible` (major equal, minor `<=`).
+
+`tessera_mpe_*` (in `libtessera.a`) decodes a raw MIDI channel-message stream into
+these events: under MPE each note is on its own channel, so the decoder tracks the
+active note per channel and tags that channel's pitch bend, channel pressure, and
+CC 74 onto it. The MIDI parser now also emits `MIDI_PITCHBEND` and `MIDI_PRESSURE`
+(previously parsed but dropped). Covered by `make test-arm-mpe`.

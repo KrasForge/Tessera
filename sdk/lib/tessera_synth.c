@@ -36,6 +36,21 @@ float tessera_note_to_hz(int note)
     return 440.0f * exp2f_((float)(note - 69) / 12.0f);
 }
 
+/* Frequency for a (possibly fractional) note, used to apply per-note pitch bend. */
+static float hz_of(float note)
+{
+    return 440.0f * exp2f_((note - 69.0f) / 12.0f);
+}
+
+/* Re-point a voice's oscillators at its note plus its current pitch bend. */
+static void voice_retune(tessera_synth_t *s, tessera_voice_t *v)
+{
+    float hz = hz_of((float)v->note + v->bend_semi);
+    tessera_osc_set(&v->osc, s->sr, hz);
+    tessera_fm_op_set(&v->fm_car, s->sr, hz);
+    tessera_fm_op_set(&v->fm_mod, s->sr, hz * s->fm_ratio);
+}
+
 static float voice_osc(tessera_synth_t *s, tessera_voice_t *v)
 {
     switch (s->waveform) {
@@ -58,11 +73,14 @@ void tessera_synth_init(tessera_synth_t *s, tessera_voice_t *voices,
     /* A gentle default patch; override with tessera_synth_set. */
     s->a_ms = 5.0f; s->d_ms = 60.0f; s->sustain = 0.7f; s->r_ms = 120.0f;
     s->fm_ratio = 1.0f; s->fm_index = 0.0f;   /* FM off until set */
+    s->bend_range = 48.0f;                     /* MPE default +/- 48 semitones */
     s->age  = 0;
     for (int i = 0; i < n_voices; i++) {
         voices[i].active = 0;
         voices[i].note   = -1;
         voices[i].gain   = 0.0f;
+        voices[i].bend_semi = 0.0f;
+        voices[i].pressure  = 1.0f;
         voices[i].born    = 0;
         tessera_osc_set(&voices[i].osc, sr, 440.0f);
         tessera_adsr_init(&voices[i].adsr, sr, s->a_ms, s->d_ms, s->sustain, s->r_ms);
@@ -111,12 +129,11 @@ void tessera_synth_note_on(tessera_synth_t *s, int note, int velocity)
     v->note   = note;
     v->gain   = (float)velocity / 127.0f;
     v->born   = ++s->age;
-    float hz = tessera_note_to_hz(note);
-    tessera_osc_set(&v->osc, s->sr, hz);
-    /* Arm the FM operators too (used only by TESSERA_WAVE_FM); reset phase so a
-     * retrigger starts cleanly. */
-    tessera_fm_op_set(&v->fm_car, s->sr, hz);
-    tessera_fm_op_set(&v->fm_mod, s->sr, hz * s->fm_ratio);
+    v->bend_semi = 0.0f;
+    v->pressure  = 1.0f;
+    /* Point the oscillators at the (un-bent) note; arm the FM operators too
+     * (used only by TESSERA_WAVE_FM); reset phase so a retrigger starts cleanly. */
+    voice_retune(s, v);
     v->fm_car.phase = 0.0f;
     v->fm_mod.phase = 0.0f;
     tessera_adsr_init(&v->adsr, s->sr, s->a_ms, s->d_ms, s->sustain, s->r_ms);
@@ -133,11 +150,39 @@ void tessera_synth_note_off(tessera_synth_t *s, int note)
     }
 }
 
+void tessera_synth_set_bend_range(tessera_synth_t *s, float semitones)
+{
+    s->bend_range = semitones < 0.0f ? 0.0f : semitones;
+}
+
+/* Apply a per-note expression event to the sounding voice(s) on that note. */
+static void apply_expression(tessera_synth_t *s, const tessera_note_event_t *ev)
+{
+    for (int i = 0; i < s->n_voices; i++) {
+        tessera_voice_t *v = &s->voices[i];
+        if (!v->active || v->note != ev->data1)
+            continue;
+        switch (ev->type) {
+        case TESSERA_EV_PITCH:
+            v->bend_semi = ((float)ev->value / 8192.0f) * s->bend_range;
+            voice_retune(s, v);
+            break;
+        case TESSERA_EV_PRESSURE:
+            v->pressure = (float)ev->data2 / 127.0f;
+            break;
+        default: break;   /* TIMBRE reserved for a future timbral mapping */
+        }
+    }
+}
+
 void tessera_synth_event(tessera_synth_t *s, const tessera_note_event_t *ev)
 {
     switch (ev->type) {
     case TESSERA_EV_NOTE_ON:  tessera_synth_note_on(s, ev->data1, ev->data2); break;
     case TESSERA_EV_NOTE_OFF: tessera_synth_note_off(s, ev->data1);           break;
+    case TESSERA_EV_PITCH:
+    case TESSERA_EV_PRESSURE:
+    case TESSERA_EV_TIMBRE:   apply_expression(s, ev);                        break;
     default: break;   /* CC and others are the plugin's business, not the engine's */
     }
 }
@@ -154,7 +199,7 @@ float tessera_synth_render(tessera_synth_t *s)
             v->note   = -1;
             continue;
         }
-        mix += voice_osc(s, v) * env * v->gain;
+        mix += voice_osc(s, v) * env * v->gain * v->pressure;
     }
     return mix;
 }

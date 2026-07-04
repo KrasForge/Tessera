@@ -893,6 +893,15 @@ test-arm-synth: | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_SYNTH_TEST_SRCS) -o $(ARM_BUILD_DIR)/synth_test -lm
 	$(ARM_BUILD_DIR)/synth_test
 
+# Host unit tests for MPE / per-note expression (Theme M17, #171): the decoder
+# and its effect on the synth (per-note pitch bend, pressure).
+ARM_MPE_TEST_SRCS = tests/arm64/mpe_test.c sdk/lib/tessera_mpe.c sdk/lib/tessera_synth.c \
+                    sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c
+test-arm-mpe: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk $(ARM_MPE_TEST_SRCS) -o $(ARM_BUILD_DIR)/mpe_test -lm
+	$(ARM_BUILD_DIR)/mpe_test
+
 # Host unit tests for the master transport (Theme C, issue #114): fixed-point
 # position advance, bar/beat accounting, MIDI clock in (tempo) and out (24 PPQN).
 ARM_TP_TEST_SRCS = tests/arm64/transport_test.c $(ARCH_ARM_DIR)/transport.c

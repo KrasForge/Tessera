@@ -59,7 +59,23 @@ static int emit(const midi_parser_t *p, midi_event_t *out)
         out->data2   = 0;
         return 1;
     }
-    return 0;       /* aftertouch / pitch-bend: parsed, not emitted */
+    if (hi == 0xD0) {
+        /* Channel Pressure (aftertouch): one data byte. */
+        out->type    = MIDI_PRESSURE;
+        out->channel = ch;
+        out->data1   = p->data[0];
+        out->data2   = 0;
+        return 1;
+    }
+    if (hi == 0xE0) {
+        /* Pitch Bend: LSB then MSB (14-bit, centre 8192). */
+        out->type    = MIDI_PITCHBEND;
+        out->channel = ch;
+        out->data1   = p->data[0];
+        out->data2   = p->data[1];
+        return 1;
+    }
+    return 0;       /* poly aftertouch: parsed, not emitted */
 }
 
 int midi_parse_byte(midi_parser_t *p, uint8_t byte, midi_event_t *out)

@@ -56,7 +56,7 @@ extern "C" {
  * accepts a plugin only when its major matches and its minor is <= the host's
  * minor, so additive (minor) changes stay backward compatible. */
 #define TESSERA_PLUGIN_ABI_VERSION_MAJOR 1u
-#define TESSERA_PLUGIN_ABI_VERSION_MINOR 1u   /* v1.1: note/transport events (issue #124) */
+#define TESSERA_PLUGIN_ABI_VERSION_MINOR 2u   /* v1.2: per-note (MPE) expression events (issue #171) */
 #define TESSERA_PLUGIN_ABI_VERSION \
     ((TESSERA_PLUGIN_ABI_VERSION_MAJOR << 16) | TESSERA_PLUGIN_ABI_VERSION_MINOR)
 

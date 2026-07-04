@@ -22,7 +22,9 @@ typedef enum {
     MIDI_NOTE_ON,
     MIDI_NOTE_OFF,
     MIDI_CC,
-    MIDI_PROGRAM,   /* Program Change: data1 = program number (0..127) */
+    MIDI_PROGRAM,     /* Program Change: data1 = program number (0..127)         */
+    MIDI_PITCHBEND,   /* Pitch Bend: data1 = LSB, data2 = MSB (14-bit, centre 8192) */
+    MIDI_PRESSURE,    /* Channel Pressure (aftertouch): data1 = pressure (0..127) */
 } midi_type_t;
 
 /* Where an input event came from, so MIDI and CV/Gate (issue #32) can share one
@@ -40,6 +42,13 @@ typedef struct {
     uint8_t source;     /* input_source_t (added last so positional */
                         /* initialisers keep working)               */
 } midi_event_t;
+
+/* Reassemble a 14-bit pitch-bend value (0..16383, centre 8192) from a
+ * MIDI_PITCHBEND event's data bytes (data1 = LSB, data2 = MSB). */
+static inline int midi_bend14(const midi_event_t *e)
+{
+    return (int)e->data1 | ((int)e->data2 << 7);
+}
 
 /* ---- byte-stream parser ---- */
 typedef struct {

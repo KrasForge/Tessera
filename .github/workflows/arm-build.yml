@@ -681,6 +681,9 @@ jobs:
       - name: SDK polyphonic-synth host unit tests (voices/note-events/stealing, ASan + UBSan)
         run: make test-arm-synth
 
+      - name: MPE / per-note expression host unit tests (decoder + synth bend/pressure, ASan + UBSan)
+        run: make test-arm-mpe
+
       - name: Rust plugin SDK - gain plugin through the generated C ABI (cargo test)
         run: make test-rust-sdk
 
