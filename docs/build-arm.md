@@ -96,9 +96,35 @@ Set in the `Makefile` ARM section:
 
 - **QEMU:** a `qemu-system-aarch64 -machine raspi4b` boot-smoke target is added
   in **issue #5** (CI). `qemu-system-aarch64` is not required to build.
-- **Hardware:** copy `kernel8.img` to the boot partition of a Pi 4 / CM4 SD
-  card (with `arm_64bit=1` in `config.txt`). A visible boot banner over UART
-  arrives with the console driver in **issue #3**.
+- **Hardware:** copy `build/arm/kernel8.img` **and** [`boot/config.txt`](../boot/config.txt)
+  onto the FAT boot partition of a Pi 4 / CM4 SD/eMMC card. The provided
+  `config.txt` sets `arm_64bit=1`, loads the kernel at `0x80000`, and enables the
+  PL011 UART0 console (GPIO 14/15, 115200 8N1). Attach a 3.3 V USB-serial adapter
+  to those pins and you should see the boot banner. The console driver is
+  `drivers/uart_pl011.c`; the VideoCore clock/board-revision handshake used at
+  boot is the property mailbox, `drivers/mailbox.c` (issue #105).
+
+### VideoCore mailbox
+
+The ARM cores configure the UART and I2S clocks - and read the board revision -
+by posting a **property message** to the VideoCore firmware over the mailbox
+(`drivers/mailbox.c`). A message is a tag list (`get board revision`, `set the PCM
+clock to 48000*256`, ...); the message *format* is pure serialisation and is
+host-tested with `make test-arm-mailbox`, while `mbox_call` is the one-register
+hardware doorbell used on the board.
+
+### raspi4b under QEMU
+
+QEMU >= 9.0 emulates the BCM2711 as `-machine raspi4b`. When available it is used
+for a boot-smoke in CI (issue #107); to run it locally:
+
+```
+qemu-system-aarch64 -machine raspi4b -nographic -serial stdio \
+    -no-reboot -kernel build/arm/kernel8.img
+```
+
+Older QEMU builds do not provide the `raspi4b` machine; the CI step skips itself
+with a notice in that case.
 
 ## Layout
 

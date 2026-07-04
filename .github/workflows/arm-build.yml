@@ -39,6 +39,9 @@ jobs:
           test -f build/arm/kernel8.img
           ls -lh build/arm/kernel8.img
 
+      - name: VideoCore mailbox host unit tests (property message format, ASan + UBSan)
+        run: make test-arm-mailbox
+
       - name: Boot smoke test (QEMU raspi4b, serial stdio)
         run: |
           if ! qemu-system-aarch64 -machine help 2>/dev/null | grep -q '^raspi4b'; then

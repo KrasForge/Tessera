@@ -291,6 +291,14 @@ test-arm-sched-qemu: | $(ARM_BUILD_DIR)
 	  && echo "QEMU virt context-switch test PASSED" \
 	  || { echo "QEMU virt context-switch test FAILED"; exit 1; }
 
+# Host unit tests for the VideoCore property-mailbox message format (M10, #105).
+# The MMIO doorbell (mbox_call) needs real hardware and is not exercised here.
+ARM_MAILBOX_TEST_SRCS = tests/arm64/mailbox_test.c drivers/mailbox.c
+test-arm-mailbox: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Idrivers $(ARM_MAILBOX_TEST_SRCS) -o $(ARM_BUILD_DIR)/mailbox_test
+	$(ARM_BUILD_DIR)/mailbox_test
+
 # Host unit tests for the I2S clock + waveform math (issue #16).
 ARM_I2S_TEST_SRCS = tests/arm64/i2s_test.c drivers/i2s.c
 ARM_I2S_TEST_BIN  = $(ARM_BUILD_DIR)/i2s_test
