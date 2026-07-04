@@ -71,6 +71,11 @@ int gc_add_input(graph_control_t *gc);
  * the edge.  Returns GC_OK or a negative GC_E* (GC_EEXIST for a duplicate). */
 int gc_connect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid);
 
+/* sys_graph_connect_feedback: wire src_pid -> dst_pid as a one-block-delayed
+ * feedback edge (issue #117) - exempt from the acyclic check, so feedback-delay
+ * and reverb topologies are expressible. */
+int gc_connect_feedback(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid);
+
 /* sys_graph_disconnect: tear down src_pid -> dst_pid (unmap + free + remove). */
 int gc_disconnect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid);
 

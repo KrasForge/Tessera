@@ -97,7 +97,8 @@ static void gc_end(graph_control_t *gc)
     __atomic_store_n(&gc->generation, gc->generation + 1u, __ATOMIC_RELEASE);
 }
 
-int gc_connect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
+static int gc_connect_ex(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid,
+                         int feedback)
 {
     int si = audio_graph_node_by_pid(&gc->graph, src_pid);
     int di = audio_graph_node_by_pid(&gc->graph, dst_pid);
@@ -111,7 +112,8 @@ int gc_connect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
         return GC_ENOMEM;
 
     gc_begin(gc);
-    int e = audio_graph_connect(&gc->graph, si, di);
+    int e = feedback ? audio_graph_connect_feedback(&gc->graph, si, di)
+                     : audio_graph_connect(&gc->graph, si, di);
     if (e < 0) {
         gc_end(gc);
         if (gc->ops.ring_del) gc->ops.ring_del(gc->ops.ctx, ring);
@@ -125,6 +127,19 @@ int gc_connect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
     gc_end(gc);
     gc_changed(gc);
     return GC_OK;
+}
+
+int gc_connect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
+{
+    return gc_connect_ex(gc, src_pid, dst_pid, 0);
+}
+
+/* sys_graph_connect_feedback: wire src_pid -> dst_pid as a one-block-delayed
+ * feedback edge (issue #117), so feedback-delay and reverb topologies can be
+ * built without failing the acyclic check. */
+int gc_connect_feedback(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
+{
+    return gc_connect_ex(gc, src_pid, dst_pid, 1);
 }
 
 int gc_disconnect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)

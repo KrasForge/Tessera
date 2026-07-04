@@ -41,6 +41,7 @@ typedef struct {
     int   used;
     int   src;             /* producing node index            */
     int   dst;             /* consuming node index            */
+    int   feedback;        /* 1 = one-block-delayed edge (breaks a cycle) */
     void *ring;            /* shared ring backing this edge (kernel-set) */
 } graph_edge_t;
 
@@ -77,6 +78,16 @@ int audio_graph_add_input(audio_graph_t *g);
  * sink may be a dst but never a src; the input source may be a src but never
  * a dst. */
 int audio_graph_connect(audio_graph_t *g, int src, int dst);
+
+/* Like audio_graph_connect, but marks the edge as a feedback edge: it carries
+ * the producer's *previous* block to the consumer (an explicit one-block delay),
+ * so it is exempt from the acyclic requirement and lets feedback-delay and
+ * reverb topologies be expressed while the graph still schedules by topological
+ * order.  Returns the edge index, or -1 on the same errors as connect. */
+int audio_graph_connect_feedback(audio_graph_t *g, int src, int dst);
+
+/* Whether edge `e` is a feedback (one-block-delayed) edge. */
+int audio_graph_edge_is_feedback(const audio_graph_t *g, int e);
 
 /* Attach the kernel-allocated ring buffer to an edge. */
 void audio_graph_set_edge_ring(audio_graph_t *g, int edge, void *ring);
