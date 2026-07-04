@@ -166,8 +166,62 @@ PATCH-SWITCH: PASS
   click; the crossfade removes it.
 - **gains-unit = 1** - the two gains sum to unity at every ramp step.
 
+## Plugin hot-reload
+
+Replacing a plugin's ELF live - a fast dev loop, and a field-update path - must
+not leave a gap in the audio. This is safe precisely because plugins are
+MMU-isolated: the new version (`arch/arm64/hot_reload.c` drives the sequence)
+is loaded into its **own fresh address space** while the old version keeps
+running in its own, so the two coexist with no shared state, and the swap is a
+single pointer flip at a block boundary. A single-process host cannot do this
+safely - swapping code under a running engine risks the whole process.
+
+### Mechanism
+
+The reload state machine guarantees:
+
+- the running generation produces **every** block until the new one is fully
+  loaded and initialised - no block is ever produced by a half-ready version
+  (the no-dropout guarantee);
+- the swap commits at exactly one block boundary, after which the old generation
+  is retired and its address space freed;
+- a load that **fails** leaves the running version in place, unchanged (no
+  dropout, no regression);
+- only one reload is in flight at a time and generations advance monotonically,
+  so a retired version never runs again.
+
+### How it is reproduced
+
+```
+# Pure reload sequencing (host, deterministic):
+make test-arm-hot-reload
+
+# End to end on QEMU virt:
+make test-arm-hot-reload-qemu CROSS_COMPILE=aarch64-linux-gnu-
+```
+
+The QEMU harness (`tests/arm64/virt/hot_reload_main.c`) drives the **real**
+plugin manager: it loads the reference effect as generation 0, reloads it as
+generation 1 into a second isolated address space while generation 0 is still
+running, swaps production at a block boundary, and retires generation 0:
+
+```
+gen0-pid=1 gen1-pid=2 distinct=1 both-live=1 prepared=1
+swap: to-new=1 retired-old=1 old-gone=1 new-live=1 swaps=1
+never-silent=6/6  leak: baseline=... after=... no-leak=1
+```
+
+- **distinct / both-live** - the two generations are separate isolated
+  processes (different pids) and both are live at the moment of overlap.
+- **never-silent = 6/6** - every block carries sound, across the swap - no
+  dropped block.
+- **old-gone** - after the swap the retired pid no longer resolves; the old
+  instance is genuinely gone.
+- **no-leak** - unloading everything returns the frame allocator to baseline, so
+  the retired address space was fully reclaimed.
+
 ## Planned in this theme
 
-Further never-go-silent work (each to be built to the same bar - mechanism, host
-tests, a QEMU harness): plugin hot-reload without a dropout, and a crash
-black-box that persists the last blocks and the faulting plugin across a reboot.
+Further never-go-silent work (to be built to the same bar - mechanism, host
+tests, a QEMU harness): a crash black-box that persists the last blocks and the
+faulting plugin across a reboot.

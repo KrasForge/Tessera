@@ -566,6 +566,17 @@ test-arm-patch-switch: | $(ARM_BUILD_DIR)
 	      $(ARM_XF_TEST_SRCS) -o $(ARM_XF_TEST_BIN)
 	$(ARM_XF_TEST_BIN)
 
+# Host unit tests for plugin hot-reload (Theme A: reliability): the reload
+# state machine that swaps a plugin's ELF live with no dropped block.
+ARM_HR_TEST_SRCS = tests/arm64/hot_reload_test.c $(ARCH_ARM_DIR)/hot_reload.c
+ARM_HR_TEST_BIN  = $(ARM_BUILD_DIR)/hot_reload_test
+
+test-arm-hot-reload: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_HR_TEST_SRCS) -o $(ARM_HR_TEST_BIN)
+	$(ARM_HR_TEST_BIN)
+
 # Host unit tests for the ELF64 reader (issue #24).
 ARM_ELF_TEST_SRCS = tests/arm64/elf_test.c $(ARCH_ARM_DIR)/elf64.c
 ARM_ELF_TEST_BIN  = $(ARM_BUILD_DIR)/elf_test
@@ -1361,6 +1372,59 @@ test-arm-patch-switch-qemu: | $(ARM_BUILD_DIR)
 	@grep -q "PATCH-SWITCH: PASS" $(ARM_BUILD_DIR)/virt_patch_switch.log \
 	  && echo "QEMU virt patch-switch test PASSED" \
 	  || { echo "QEMU virt patch-switch test FAILED"; exit 1; }
+
+# Plugin hot-reload on QEMU 'virt' (Theme A: reliability): MMU on, single core.
+# The reference effect is loaded as generation 0, then reloaded as generation 1
+# into a second isolated address space; production swaps to gen 1 at a block
+# boundary and gen 0 is retired.  Asserts never-silent across the swap, two
+# distinct live instances at the overlap, a clean retire, and no leak.
+VIRT_HR_ELF  = $(ARM_BUILD_DIR)/virt_hot_reload.elf
+VIRT_HR_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+               $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+               $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+               $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+               $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+               $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c \
+               $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c \
+               $(ARCH_ARM_DIR)/sandbox.c $(ARCH_ARM_DIR)/string.c \
+               $(ARCH_ARM_DIR)/hot_reload.c
+
+test-arm-hot-reload-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/hr_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/hr_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/hr_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/hr_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/hot_reload_blob.S      -o $(ARM_BUILD_DIR)/hr_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/hr_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iinclude -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/hot_reload_main.c -o $(ARM_BUILD_DIR)/hr_main.o
+	for s in $(VIRT_HR_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/hr_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -Iinclude -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_HR_ELF) \
+	    $(ARM_BUILD_DIR)/hr_start.o $(ARM_BUILD_DIR)/hr_main.o \
+	    $(ARM_BUILD_DIR)/hr_uart.o $(ARM_BUILD_DIR)/hr_vectors.o \
+	    $(ARM_BUILD_DIR)/hr_entry.o $(ARM_BUILD_DIR)/hr_tramp.o \
+	    $(ARM_BUILD_DIR)/hr_blob.o \
+	    $(ARM_BUILD_DIR)/hr_pmm.o $(ARM_BUILD_DIR)/hr_mmu.o \
+	    $(ARM_BUILD_DIR)/hr_vmem.o $(ARM_BUILD_DIR)/hr_process.o \
+	    $(ARM_BUILD_DIR)/hr_exceptions.o $(ARM_BUILD_DIR)/hr_syscalls.o \
+	    $(ARM_BUILD_DIR)/hr_elf64.o $(ARM_BUILD_DIR)/hr_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/hr_audio_ringbuf.o $(ARM_BUILD_DIR)/hr_audio_graph.o \
+	    $(ARM_BUILD_DIR)/hr_graph_control.o $(ARM_BUILD_DIR)/hr_param_queue.o \
+	    $(ARM_BUILD_DIR)/hr_plugin_mgr.o $(ARM_BUILD_DIR)/hr_patch.o \
+	    $(ARM_BUILD_DIR)/hr_vfs.o $(ARM_BUILD_DIR)/hr_fat.o \
+	    $(ARM_BUILD_DIR)/hr_sandbox.o $(ARM_BUILD_DIR)/hr_string.o \
+	    $(ARM_BUILD_DIR)/hr_hot_reload.o
+	rm -f $(ARM_BUILD_DIR)/virt_hot_reload.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_hot_reload.log -net none \
+	    -kernel $(VIRT_HR_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_hot_reload.log
+	@grep -q "HOT-RELOAD: PASS" $(ARM_BUILD_DIR)/virt_hot_reload.log \
+	  && echo "QEMU virt hot-reload test PASSED" \
+	  || { echo "QEMU virt hot-reload test FAILED"; exit 1; }
 
 # ---- M7: live parameter changes (issue #33) -------------------------------
 # Integration host test: CC -> param map -> lock-free queue -> filter, checking
