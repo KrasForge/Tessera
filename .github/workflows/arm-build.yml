@@ -77,6 +77,16 @@ jobs:
       - name: Run M2 host unit tests (ASan + UBSan)
         run: make test-arm-m2
 
+  transport-tests:
+    name: Theme C transport - master clock host tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Master-transport host unit tests (position, bar/beat, MIDI clock, ASan + UBSan)
+        run: make test-arm-transport
+
   audio-tests:
     name: M3 audio - I2S host math + QEMU virt API smoke
     runs-on: ubuntu-22.04

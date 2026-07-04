@@ -831,6 +831,14 @@ test-arm-dsp: | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_DSP_TEST_SRCS) -o $(ARM_BUILD_DIR)/dsp_test -lm
 	$(ARM_BUILD_DIR)/dsp_test
 
+# Host unit tests for the master transport (Theme C, issue #114): fixed-point
+# position advance, bar/beat accounting, MIDI clock in (tempo) and out (24 PPQN).
+ARM_TP_TEST_SRCS = tests/arm64/transport_test.c $(ARCH_ARM_DIR)/transport.c
+test-arm-transport: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_TP_TEST_SRCS) -o $(ARM_BUILD_DIR)/transport_test
+	$(ARM_BUILD_DIR)/transport_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.
