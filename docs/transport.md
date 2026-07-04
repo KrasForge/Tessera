@@ -74,3 +74,25 @@ note sounds at a time) and pure integer:
 
 The emitted note events feed a downstream synth (Theme B, #113) through the ABI
 v1.1 event queue (#124). Covered by `make test-arm-arp`.
+
+## Looper (Theme M17, issue #172)
+
+A looper records a phrase, plays it back forever, then overdubs more layers on top
+- the defining live-performance pedal (`arch/arm64/looper.c`). Two guarantees a
+single-process host cannot make:
+
+- **Bounded memory.** The loop layers live in the caller's fixed track buffers, so
+  a runaway record can never exhaust system RAM - the loop length is capped by the
+  per-plugin memory quota, and recording auto-stops when it reaches the buffer end.
+- **Grid-locked.** Record start/stop snap to the transport quantise grid (a bar in
+  samples, issue #114), so the loop length lands on a musical boundary and every
+  overdub stays aligned to the beat.
+
+`looper_record` toggles between laying the first layer and overdubbing the next
+track; `looper_stop` snaps the loop length to the grid and returns to playback;
+overdubs **sum** into the mix, saturating rather than wrapping. Transitions are
+**click-free**: the punch-in / punch-out edges of each recorded layer are
+short-ramped, so the loop seam and every overdub boundary are silence-to-signal
+rather than a step. Q15 fixed-point on int16 PCM - it runs on the audio path.
+
+Covered by `make test-arm-looper`.

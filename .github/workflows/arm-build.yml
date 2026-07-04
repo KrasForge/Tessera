@@ -96,6 +96,9 @@ jobs:
       - name: Arpeggiator host unit tests (up/down/updown/random patterns, ASan + UBSan)
         run: make test-arm-arp
 
+      - name: Looper host unit tests (record/overdub/quantise/bounded/click-free, ASan + UBSan)
+        run: make test-arm-looper
+
       - name: Offline WAV plugin host self-test (round-trip + low-pass, ASan + UBSan)
         run: make test-arm-offline-host
 
