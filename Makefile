@@ -1338,6 +1338,17 @@ test-arm-golden: golden-build
 	$(ARM_BUILD_DIR)/golden_synth   tests/golden/synth.csv   tests/golden/synth.pcm
 	$(ARM_BUILD_DIR)/golden_sampler tests/golden/sampler.csv tests/golden/sampler.pcm
 
+# Shared parser fuzz harness (Theme M16, #169): flood the untrusted parsers
+# (OSC/USB/package/mailbox/presets) with random and mutated bytes under ASan +
+# UBSan.  Deterministic (seeded) with a bounded round count, so it is a CI gate.
+ARM_FUZZ_SRCS = tests/arm64/fuzz_parsers.c $(ARCH_ARM_DIR)/osc.c $(ARCH_ARM_DIR)/usbaudio.c \
+                $(ARCH_ARM_DIR)/package.c $(ARCH_ARM_DIR)/sha256.c $(ARCH_ARM_DIR)/presets.c \
+                $(DRIVERS_DIR)/mailbox.c
+test-arm-fuzz: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) -I$(DRIVERS_DIR) $(ARM_FUZZ_SRCS) -o $(ARM_BUILD_DIR)/fuzz_parsers
+	$(ARM_BUILD_DIR)/fuzz_parsers
+
 golden-bless: golden-build
 	$(ARM_BUILD_DIR)/golden_filter  tests/golden/filter.csv  tests/golden/filter.pcm  --bless
 	$(ARM_BUILD_DIR)/golden_synth   tests/golden/synth.csv   tests/golden/synth.pcm   --bless
