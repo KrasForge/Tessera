@@ -246,6 +246,9 @@ jobs:
       - name: Budget-policy host unit tests (escalation + registry, ASan + UBSan)
         run: make test-arm-budget
 
+      - name: Syscall / I/O-rate quota host unit tests (throttle + kill escalation, ASan + UBSan)
+        run: make test-arm-iobudget
+
       - name: Per-plugin profiler host unit tests (load/headroom aggregation, ASan + UBSan)
         run: make test-arm-profiler
 

@@ -396,3 +396,52 @@ The harness is self-validating: downgrading the producer's release-store to
 verifies the ordering rather than passing vacuously. `make test-arm-queue-race`
 (a separate TSan build - it cannot be combined with ASan); wired into the M4
 audio-core CI job.
+
+## Per-plugin syscall / I/O-rate quota (Theme M22, issue #198)
+
+The resource-isolation story had two of its three legs: the M12 CPU budget
+(`arch/arm64/budget.c`) bounds a plugin's *compute*, and the memory quota
+(`arch/arm64/mem_quota.h`) bounds its *RAM*. A plugin that can blow neither can
+still hammer the SVC gate (or a storage/DMA path) and steal time from the
+system. This closes the last hole - CPU, memory, and **syscalls** all bounded
+per plugin.
+
+`arch/arm64/io_quota.c` is a generic per-window quota: it counts "units"
+charged against a ceiling, so one type serves both ceilings - **1 unit per SVC**
+at the gate for a syscall-rate ceiling, or a **byte count** per operation for an
+I/O-bandwidth ceiling. Enforcement has the same two-level shape as the CPU
+budget:
+
+- **Immediate throttle (per charge).** Once a window's ceiling is reached,
+  `ioq_charge()` refuses further charges. The SVC gate (`arch/arm64/syscalls.c`)
+  declines the syscall - returning an error to EL0 instead of servicing it - so
+  a runaway plugin is bounded *within* the window, not merely punished after it.
+  `SYS_EXIT` and `SYS_YIELD` are always honoured so a throttled plugin can still
+  relinquish the core.
+- **Escalation (per window).** `ioq_window()` applies the exact truth table of
+  `budget_account()`: a window in which any charge was refused is an offence -
+  the first in a streak **throttles** (`IOQ_THROTTLE`), `kill_after` consecutive
+  offences **kill** (`IOQ_KILL`, latched); a clean window forgives. A sustained
+  abuser is removed through the host's unload path, exactly like an over-budget
+  or faulting plugin, and the safe-mode bypass keeps the graph running.
+
+The gate hook (`syscall_quota_charge`) is a weak no-op by default, so the
+trusted kernel path and ungoverned harnesses are unaffected (no false
+positives); the audio engine's glue binds the strong version to the running
+plugin's `io_quota_t`. Counts surface on the `prof`/shell view via
+`ioq_render()` alongside CPU load.
+
+### How it is reproduced
+
+```
+# Pure accounting + escalation + gate simulation (host, deterministic):
+make test-arm-iobudget
+```
+
+`tests/arm64/io_quota_test.c` validates within-window throttling at the ceiling,
+the throttle/kill escalation across windows, forgiveness on a clean window, the
+killed latch, the byte-count I/O-bandwidth ceiling, and a gate simulation: a
+plugin issuing 40 syscalls/block against an 8/block ceiling has only 8 serviced
+each block and is killed after three offending windows, while a well-behaved
+plugin at 3/block runs 1000 blocks with zero offences and nothing throttled -
+the no-false-positive guarantee. ASan + UBSan clean.

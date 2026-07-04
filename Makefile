@@ -600,6 +600,19 @@ test-arm-mem-quota: | $(ARM_BUILD_DIR)
 	      $(ARM_MQ_TEST_SRCS) -o $(ARM_MQ_TEST_BIN)
 	$(ARM_MQ_TEST_BIN)
 
+# Host unit tests for the per-plugin syscall / I/O-rate quota (Theme M22, issue
+# #198): within-window throttling at the ceiling, the throttle/kill escalation
+# across windows (mirroring the CPU budget), forgiveness, the killed latch, the
+# byte-count I/O-bandwidth ceiling, and a gate simulation.  Pure C, ASan/UBSan.
+ARM_IOQ_TEST_SRCS = tests/arm64/io_quota_test.c $(ARCH_ARM_DIR)/io_quota.c
+ARM_IOQ_TEST_BIN  = $(ARM_BUILD_DIR)/io_quota_test
+
+test-arm-iobudget: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_IOQ_TEST_SRCS) -o $(ARM_IOQ_TEST_BIN)
+	$(ARM_IOQ_TEST_BIN)
+
 # Host unit tests for glitch-free crossfade patch switching (Theme A:
 # reliability): the fixed-point Q15 mixer that swaps patches without a click.
 ARM_XF_TEST_SRCS = tests/arm64/xfade_test.c $(ARCH_ARM_DIR)/xfade.c
