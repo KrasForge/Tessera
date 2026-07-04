@@ -11,8 +11,26 @@ Tessera kernel sources or headers are required.
 | `tessera.h`            | The single header you include. Wraps the ABI and adds convenience macros and helper declarations. |
 | `plugin_abi.h`         | The frozen Plugin ABI v1 header (bundled; identical to the kernel's `include/plugin_abi.h`). |
 | `tessera.ld`           | Link script that lays out a plugin at the Tessera user base with separate R-X / R / R-W segments (W^X-safe). |
-| `libtessera.a`         | Static helper library (built from `lib/`): `tessera_sinf`, `tessera_clampf`, `tessera_param_queue_read`. |
+| `libtessera.a`         | Static helper library (built from `lib/`): `tessera_sinf`, `tessera_clampf`, `tessera_param_queue_read`, and the DSP building blocks. |
 | `lib/`                 | Sources for `libtessera.a`. No libc, no allocation. |
+
+### DSP building blocks
+
+`libtessera.a` ships a small, real-time-safe DSP toolkit so you do not start from
+`sinf` and a bare buffer (all allocation-free, no libc):
+
+- **`tessera_smooth_*`** - a one-pole smoother for click-free parameter changes.
+- **`tessera_biquad_*`** - RBJ biquads (low/high-pass, band-pass, notch, peaking,
+  low/high shelf) with a per-sample `tessera_biquad_process`.
+- **`tessera_osc_*`** - sine / saw / square / triangle oscillators (saw and square
+  are polyBLEP anti-aliased).
+- **`tessera_delay_*`** - a fractional (interpolated) delay line over a
+  caller-supplied buffer.
+- **`tessera_envfollow_*`** - a peak envelope follower with attack/release.
+- **`tessera_adsr_*`** - an ADSR envelope generator.
+
+Declarations and doc comments are in [`tessera.h`](tessera.h); the blocks are
+unit-tested by `make test-arm-dsp`.
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |

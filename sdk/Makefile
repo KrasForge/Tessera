@@ -15,7 +15,7 @@ AR  = $(CROSS_COMPILE)ar
 CFLAGS = -mcpu=cortex-a72 -ffreestanding -fPIC -O2 -std=c11 -Wall -Wextra -I.
 
 LIB     = libtessera.a
-SOURCES = lib/tessera_math.c lib/tessera_param.c
+SOURCES = lib/tessera_math.c lib/tessera_param.c lib/tessera_dsp.c
 OBJECTS = $(SOURCES:.c=.o)
 
 .PHONY: all clean
