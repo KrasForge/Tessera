@@ -648,6 +648,9 @@ jobs:
       - name: SDK wavetable/FM oscillator host unit tests (pitch/anti-alias/sidebands, ASan + UBSan)
         run: make test-arm-wtfm
 
+      - name: SDK streaming-sampler host unit tests (pitch/loop/bounded-mem/underrun, ASan + UBSan)
+        run: make test-arm-sampler
+
       - name: SDK effects-suite host unit tests (overdrive/comp/EQ/delay/chorus/gate/reverb/tuner, ASan + UBSan)
         run: make test-arm-fx
 

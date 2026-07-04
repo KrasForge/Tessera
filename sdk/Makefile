@@ -16,7 +16,8 @@ CFLAGS = -mcpu=cortex-a72 -ffreestanding -fPIC -O2 -std=c11 -Wall -Wextra -I.
 
 LIB     = libtessera.a
 SOURCES = lib/tessera_math.c lib/tessera_param.c lib/tessera_dsp.c lib/tessera_event.c \
-          lib/tessera_fx.c lib/tessera_conv.c lib/tessera_synth.c
+          lib/tessera_fx.c lib/tessera_conv.c lib/tessera_synth.c \
+          lib/tessera_sampler.c
 OBJECTS = $(SOURCES:.c=.o)
 
 .PHONY: all clean

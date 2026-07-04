@@ -31,6 +31,11 @@ Tessera kernel sources or headers are required.
 - **`tessera_fm_op_*` / `tessera_fm2`** - phase-modulatable sine operators and a
   two-operator FM voice (ratio + index); `tessera_synth` exposes them as the
   `TESSERA_WAVE_FM` waveform via `tessera_synth_set_fm`.
+- **`tessera_sampler_*`** - a streaming sampler: the host pushes source samples
+  into a fixed ring off the audio path and the audio path pulls pitched,
+  interpolated output. The ring is bounded, so memory never grows with the sample
+  length (it cannot exceed the per-plugin memory quota); a refill that falls
+  behind yields silence instead of stalling. Looping is fed by the host.
 - **`tessera_delay_*`** - a fractional (interpolated) delay line over a
   caller-supplied buffer.
 - **`tessera_envfollow_*`** - a peak envelope follower with attack/release.

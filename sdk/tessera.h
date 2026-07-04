@@ -226,6 +226,44 @@ float tessera_wt_process(tessera_wavetable_t *wt);
  * harmonics (sum of sin(k*phase)/k), normalised to roughly [-1, 1]. */
 void  tessera_wt_bandlimit(float *table, int len, int n_harmonics);
 
+/* ---- streaming sampler (Theme M15, issue #165) --------------------------- *
+ * Plays a PCM sample that is streamed in from storage rather than held whole in
+ * RAM.  The host pushes source samples into a fixed ring (`tessera_sampler_push`)
+ * off the audio path; the audio path pulls resampled output
+ * (`tessera_sampler_process`) at a pitch ratio with linear interpolation.  The
+ * ring is bounded, so memory never grows with the sample length - a sampler
+ * cannot blow its per-plugin memory quota no matter how long the sample.  If the
+ * refill falls behind, the pull returns silence (and holds position) instead of
+ * stalling the audio path.
+ *
+ * Looping is a fetch-side concern: the host feeds a monotonic stream, re-reading
+ * the loop region when it reaches the loop end, so the sampler stays a pure,
+ * seamless streaming resampler.  The caller owns the ring buffer. */
+typedef struct {
+    float   *buf;
+    uint32_t cap;        /* ring capacity in samples (the memory bound) */
+    uint64_t filled;     /* total samples pushed (monotonic stream length) */
+    uint64_t play;       /* Q32 fractional play cursor into the stream */
+    uint64_t pitch;      /* Q32 stream samples per output sample (1<<32 = unity) */
+} tessera_sampler_t;
+
+/* Initialise over a caller ring of `cap` samples, at unity pitch. */
+void  tessera_sampler_init(tessera_sampler_t *s, float *buf, uint32_t cap);
+/* Playback speed: 1.0 = original pitch, 2.0 = octave up, 0.5 = octave down. */
+void  tessera_sampler_set_pitch(tessera_sampler_t *s, float ratio);
+/* Append `n` source samples to the stream (host side, off the audio path).  The
+ * ring keeps only the most recent `cap` samples. */
+void  tessera_sampler_push(tessera_sampler_t *s, const float *src, uint32_t n);
+/* How many more source samples the host may push before the ring is full ahead
+ * of the play cursor (so it can size its next read). */
+uint32_t tessera_sampler_headroom(const tessera_sampler_t *s);
+/* Produce one output sample at the current pitch; returns 0 (silence) without
+ * advancing if the stream has not been buffered far enough (underrun). */
+float tessera_sampler_process(tessera_sampler_t *s);
+/* The integer stream index the play cursor is currently at (for the host's
+ * fetch/loop bookkeeping). */
+uint64_t tessera_sampler_pos(const tessera_sampler_t *s);
+
 /* ---- FM operators (Theme M15, issue #164) -------------------------------- *
  * A phase-modulatable sine operator: tessera_fm_op_process adds `phase_mod`
  * (in cycles) to the operator's phase before the sine, so operators can modulate
