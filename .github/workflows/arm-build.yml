@@ -577,6 +577,9 @@ jobs:
       - name: Signed-package host unit tests (verify/tamper/revoke/malformed, ASan + UBSan)
         run: make test-arm-package
 
+      - name: Parser fuzz harness (OSC/USB/package/mailbox/presets, seeded, ASan + UBSan)
+        run: make test-arm-fuzz
+
       - name: Sandbox airtight on QEMU virt (audit clean + catch mapping, SVC/mem kill)
         run: make test-arm-sandbox-qemu CROSS_COMPILE=aarch64-linux-gnu-
 

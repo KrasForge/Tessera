@@ -314,3 +314,20 @@ is authenticated on-device before it is ever mapped (`arch/arm64/package.c`).
 The whole path is integer-only and links into the `-mgeneral-regs-only` kernel, so
 verification runs on-device. Covered by `make test-arm-sha256` and
 `make test-arm-package`.
+
+## Parser fuzzing (Theme M16, issue #169)
+
+Tessera parses several byte streams from untrusted sources - OSC editor messages
+(#123), USB Audio descriptors (#133), signed packages (#125), the VideoCore
+mailbox (#105), and embedded presets (#127). Each is individually bounds-checked;
+`tests/arm64/fuzz_parsers.c` proves it continuously by flooding every one of them
+with random and mutated bytes under AddressSanitizer + UBSan, so an out-of-bounds
+read, an integer overflow, or a non-terminating loop trips the sanitizer and fails
+the build.
+
+It is a self-contained, **deterministic** fuzzer - a seeded LCG and a fixed
+iteration budget - so it needs no libFuzzer/clang and runs the same everywhere,
+making it a CI gate rather than an occasional manual run. Each parser is fed both
+fully random buffers and mutated copies of a valid seed message; adding a new
+parser is one entry in the target table. Covered by `make test-arm-fuzz` (60k
+rounds per parser).
