@@ -51,7 +51,15 @@ static int emit(const midi_parser_t *p, midi_event_t *out)
         out->data2   = p->data[1];
         return 1;
     }
-    return 0;       /* aftertouch / program / pitch-bend: parsed, not emitted */
+    if (hi == 0xC0) {
+        /* Program Change: one data byte, the program number. */
+        out->type    = MIDI_PROGRAM;
+        out->channel = ch;
+        out->data1   = p->data[0];
+        out->data2   = 0;
+        return 1;
+    }
+    return 0;       /* aftertouch / pitch-bend: parsed, not emitted */
 }
 
 int midi_parse_byte(midi_parser_t *p, uint8_t byte, midi_event_t *out)

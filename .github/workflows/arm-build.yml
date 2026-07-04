@@ -262,6 +262,9 @@ jobs:
       - name: OLED UI model host unit tests (meters/browse/navigation/scroll, ASan + UBSan)
         run: make test-arm-oled-ui
 
+      - name: Patch-bank / Program-Change host unit tests (banks, PC load, Bank Select, ASan + UBSan)
+        run: make test-arm-bank
+
       - name: Shell-core host unit tests (tokenise + dispatch + fuzz, ASan + UBSan)
         run: make test-arm-shell
 
