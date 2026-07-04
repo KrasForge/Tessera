@@ -237,6 +237,9 @@ jobs:
       - name: Budget-policy host unit tests (escalation + registry, ASan + UBSan)
         run: make test-arm-budget
 
+      - name: Per-plugin profiler host unit tests (load/headroom aggregation, ASan + UBSan)
+        run: make test-arm-profiler
+
       - name: Budget enforcement on QEMU virt (preempt at boundary, mute, kill)
         run: make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
