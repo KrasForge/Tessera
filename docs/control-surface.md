@@ -80,3 +80,24 @@ marked with `>` and may additionally be inverted by the driver). Integer-only, n
 allocation - it can run wherever the display task lives.
 
 Covered by `make test-arm-oled-ui`.
+
+## Program change and patch banks (issue #122)
+
+A live rig switches patches from the floor, so Tessera maps MIDI **Program Change**
+onto stored patches. `arch/arm64/bank.c` is the routing model: patches are grouped
+into *banks* (folders on the SD card), and each program in a bank is a patch file.
+Populate the model by scanning the card (`bank_add`, `bank_set_program`), then feed
+it MIDI events:
+
+- **Bank Select** - CC 0 (MSB) and CC 32 (LSB) latch a pending bank number
+  (`MSB*128 + LSB`). Bank Select only latches; it does not load on its own.
+- **Program Change** - commits any latched Bank Select, then selects that program
+  within the current bank. If the slot holds a patch, `bank_midi` returns its path
+  and the host loads it (via `patch_mgr`, issue #40); an empty slot loads nothing.
+
+The MIDI parser now emits Program Change as `MIDI_PROGRAM` (it was previously
+parsed but dropped). The selected bank persists across Program Changes until the
+next Bank Select, and an out-of-range Bank Select is ignored rather than switching
+to a bank that does not exist.
+
+Covered by `make test-arm-bank`.

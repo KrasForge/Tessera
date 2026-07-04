@@ -22,6 +22,7 @@ typedef enum {
     MIDI_NOTE_ON,
     MIDI_NOTE_OFF,
     MIDI_CC,
+    MIDI_PROGRAM,   /* Program Change: data1 = program number (0..127) */
 } midi_type_t;
 
 /* Where an input event came from, so MIDI and CV/Gate (issue #32) can share one
