@@ -37,6 +37,7 @@ typedef struct {
     uint32_t    pid;       /* plugin PID (0 = DAC, GRAPH_INPUT_PID = input) */
     uint16_t    in_ch;     /* input channel count  (default 2 = stereo)    */
     uint16_t    out_ch;    /* output channel count (default 2 = stereo)    */
+    uint32_t    latency;   /* processing latency in samples (default 0, #190) */
 } graph_node_t;
 
 typedef struct {
@@ -125,5 +126,18 @@ void audio_graph_remove_node(audio_graph_t *g, int n);
  * consumers and the DAC last.  Returns the number of nodes written, or -1 if
  * the graph has a cycle or `max` is too small. */
 int audio_graph_toposort(const audio_graph_t *g, int *order, int max);
+
+/* Declare a node's processing latency in samples (a look-ahead limiter, an FFT
+ * block, a convolution).  Default 0. */
+void audio_graph_set_latency(audio_graph_t *g, int node, uint32_t latency);
+
+/* Plugin delay compensation (issue #190).  Computes, for every edge, the extra
+ * delay (in samples) to insert so that all inputs arriving at a node are
+ * phase-aligned despite differing path latencies.  `edge_comp` is filled for all
+ * GRAPH_MAX_EDGES entries (0 for unused edges or where no compensation is
+ * needed); `*out_total`, if non-NULL, receives the graph's total latency (the
+ * aligned latency at the DAC).  Returns 0 on success, or -1 if the graph has a
+ * cycle (feedback edges are exempt and ignored, as in the toposort). */
+int audio_graph_pdc(const audio_graph_t *g, uint32_t *edge_comp, uint32_t *out_total);
 
 #endif /* ARM64_AUDIO_GRAPH_H */

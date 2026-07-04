@@ -42,6 +42,7 @@ int audio_graph_add_node(audio_graph_t *g, uint32_t pid)
     g->nodes[i].pid    = pid;
     g->nodes[i].in_ch  = 2;
     g->nodes[i].out_ch = 2;
+    g->nodes[i].latency = 0;
     g->n_nodes++;
     return i;
 }
@@ -59,6 +60,7 @@ int audio_graph_add_dac(audio_graph_t *g)
     g->nodes[i].pid    = 0;
     g->nodes[i].in_ch  = 2;
     g->nodes[i].out_ch = 2;
+    g->nodes[i].latency = 0;
     g->n_nodes++;
     g->dac_node = i;
     return i;
@@ -77,6 +79,7 @@ int audio_graph_add_input(audio_graph_t *g)
     g->nodes[i].pid    = GRAPH_INPUT_PID;
     g->nodes[i].in_ch  = 2;
     g->nodes[i].out_ch = 2;
+    g->nodes[i].latency = 0;
     g->n_nodes++;
     g->input_node = i;
     return i;
@@ -266,4 +269,56 @@ int audio_graph_toposort(const audio_graph_t *g, int *order, int max)
         order[count - 1] = g->dac_node;
     }
     return count;
+}
+
+void audio_graph_set_latency(audio_graph_t *g, int node, uint32_t latency)
+{
+    if (node_live(g, node))
+        g->nodes[node].latency = latency;
+}
+
+int audio_graph_pdc(const audio_graph_t *g, uint32_t *edge_comp, uint32_t *out_total)
+{
+    for (int e = 0; e < GRAPH_MAX_EDGES; e++)
+        edge_comp[e] = 0;
+
+    int order[GRAPH_MAX_NODES];
+    int n = audio_graph_toposort(g, order, GRAPH_MAX_NODES);
+    if (n < 0)
+        return -1;                         /* cyclic (non-feedback) graph */
+
+    /* out_latency[node] = latency at that node's *output*, i.e. how many samples
+     * behind the live input its result is.  Walking in topological order,
+     * every producer is resolved before its consumer.  Feedback edges carry the
+     * previous block and are exempt, exactly as in the toposort. */
+    uint32_t out_latency[GRAPH_MAX_NODES];
+    uint32_t arrival[GRAPH_MAX_NODES];
+    for (int i = 0; i < GRAPH_MAX_NODES; i++) { out_latency[i] = 0; arrival[i] = 0; }
+
+    for (int oi = 0; oi < n; oi++) {
+        int node = order[oi];
+        /* A node's inputs are aligned to the latest-arriving one. */
+        uint32_t a = 0;
+        for (int e = 0; e < GRAPH_MAX_EDGES; e++) {
+            if (g->edges[e].used && !g->edges[e].feedback && g->edges[e].dst == node) {
+                uint32_t src_out = out_latency[g->edges[e].src];
+                if (src_out > a) a = src_out;
+            }
+        }
+        arrival[node]     = a;
+        out_latency[node] = a + g->nodes[node].latency;
+    }
+
+    /* Each input edge is padded up to the node's (max) arrival latency, so all
+     * inputs to a summing node land phase-aligned. */
+    for (int e = 0; e < GRAPH_MAX_EDGES; e++) {
+        if (!g->edges[e].used || g->edges[e].feedback)
+            continue;
+        uint32_t src_out = out_latency[g->edges[e].src];
+        edge_comp[e] = arrival[g->edges[e].dst] - src_out;   /* >= 0 by construction */
+    }
+
+    if (out_total)
+        *out_total = (g->dac_node >= 0) ? out_latency[g->dac_node] : 0;
+    return 0;
 }
