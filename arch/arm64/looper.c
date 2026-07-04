@@ -2,13 +2,7 @@
  * See looper.h. */
 
 #include "looper.h"
-
-static int16_t sat16(int32_t v)
-{
-    if (v >  32767) return  32767;
-    if (v < -32768) return -32768;
-    return (int16_t)v;
-}
+#include "pcm_util.h"
 
 void looper_init(looper_t *l, int16_t *const *tracks, int n_tracks,
                  uint32_t cap, uint32_t quantum)

@@ -15,31 +15,16 @@
 
 #include "tessera.h"
 
-/* 2^x, exponent-field + short polynomial (same approximation as the DSP lib);
- * used only to turn a MIDI note into a frequency. */
-static float exp2f_(float x)
-{
-    if (x < -126.0f) return 0.0f;
-    if (x >  126.0f) x = 126.0f;
-    float xi = (float)(int)x;
-    if (x < 0.0f && x != xi) xi -= 1.0f;
-    float f = x - xi;
-    float p = 1.0f + f * (0.6931472f + f * (0.2402265f + f * 0.0555041f));
-    union { float f; uint32_t u; } v;
-    v.u = (uint32_t)((int)xi + 127) << 23;
-    return p * v.f;
-}
-
 float tessera_note_to_hz(int note)
 {
     /* 440 Hz = MIDI 69 (A4); 12 equal-tempered semitones per octave. */
-    return 440.0f * exp2f_((float)(note - 69) / 12.0f);
+    return 440.0f * tessera_exp2f((float)(note - 69) / 12.0f);
 }
 
 /* Frequency for a (possibly fractional) note, used to apply per-note pitch bend. */
 static float hz_of(float note)
 {
-    return 440.0f * exp2f_((note - 69.0f) / 12.0f);
+    return 440.0f * tessera_exp2f((note - 69.0f) / 12.0f);
 }
 
 /* Re-point a voice's oscillators at its note plus its current pitch bend. */

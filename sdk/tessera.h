@@ -63,6 +63,12 @@ float tessera_sinf(float x);
 /* Clamp `x` to [lo, hi].  Real-time safe. */
 float tessera_clampf(float x, float lo, float hi);
 
+/* Fast, libm-free 2^x and log2(x) (< 0.1% and < 1e-5 error).  Used across the DSP
+ * blocks for dB gains (10^(dB/20) = 2^(dB*0.16610)), note-to-frequency, and any
+ * exponential/log parameter mapping. */
+float tessera_exp2f(float x);
+float tessera_log2f(float x);
+
 /* Tau (2*pi) for phase math. */
 #define TESSERA_TAU 6.28318530717958647692f
 

@@ -12,40 +12,9 @@
 
 #include "tessera.h"
 
-/* 2^x: floor the integer part, 2^frac by a short polynomial, scale the exponent
- * field (matches the approximation used in tessera_dsp.c). */
-static float exp2f_(float x)
-{
-    if (x < -126.0f) return 0.0f;
-    if (x >  126.0f) x = 126.0f;
-    float xi = (float)(int)x;
-    if (x < 0.0f && x != xi) xi -= 1.0f;
-    float f = x - xi;
-    float p = 1.0f + f * (0.6931472f + f * (0.2402265f + f * 0.0555041f));
-    union { float f; uint32_t u; } v;
-    v.u = (uint32_t)((int)xi + 127) << 23;
-    return p * v.f;
-}
-
-/* log2(x) for x > 0: pull the exponent from the float bits, then a fast
- * atanh-series for the mantissa in [1,2).  With t = (m-1)/(m+1) (|t| <= 1/3),
- * ln(m) = 2(t + t^3/3 + t^5/5 + t^7/7); through t^7 the error is < 1e-5, so the
- * tuner's cents mapping is accurate to well under a cent. */
-static float log2f_(float x)
-{
-    if (x <= 0.0f) return -126.0f;
-    union { float f; uint32_t u; } v = { .f = x };
-    int e = (int)((v.u >> 23) & 0xffu) - 127;
-    v.u = (v.u & 0x007fffffu) | 0x3f800000u;          /* mantissa in [1,2) */
-    float m  = v.f;
-    float t  = (m - 1.0f) / (m + 1.0f);
-    float t2 = t * t;
-    float ln = 2.0f * t * (1.0f + t2 * (1.0f / 3.0f + t2 * (0.2f + t2 * (1.0f / 7.0f))));
-    return (float)e + ln * 1.4426950408889634f;        /* / ln(2) */
-}
-
-static float powf_(float base, float exp) { return exp2f_(exp * log2f_(base)); }
-static float db_to_lin_(float db)         { return exp2f_(db * 0.16609640f); } /* 10^(db/20) */
+/* Exponential helpers over the shared libm-free tessera_exp2f/tessera_log2f. */
+static float powf_(float base, float exp) { return tessera_exp2f(exp * tessera_log2f(base)); }
+static float db_to_lin_(float db)         { return tessera_exp2f(db * 0.16609640f); } /* 10^(db/20) */
 
 /* ---- overdrive ----------------------------------------------------------- */
 
@@ -250,7 +219,7 @@ int tessera_fx_note_of(float hz, float *cents)
 {
     if (hz <= 0.0f) { if (cents) *cents = 0.0f; return -1; }
     /* MIDI note 69 = A4 = 440 Hz; 12 semitones per octave. */
-    float midi = 69.0f + 12.0f * log2f_(hz / 440.0f);
+    float midi = 69.0f + 12.0f * tessera_log2f(hz / 440.0f);
     int   nearest = (int)(midi + (midi >= 0.0f ? 0.5f : -0.5f));  /* round */
     if (cents) *cents = (midi - (float)nearest) * 100.0f;
     return nearest;
