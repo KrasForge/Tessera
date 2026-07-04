@@ -1,0 +1,15 @@
+[package]
+name = "tessera-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Safe Rust wrapper over the Tessera C plugin ABI (v1.1)"
+license = "MIT OR Apache-2.0"
+
+# A Tessera plugin is a freestanding shared object with no libc; a plugin crate
+# built from this SDK is compiled as a cdylib for the aarch64 target. The SDK
+# library itself is target-agnostic and no_std (std is pulled in only for `cargo
+# test` on the host).
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
