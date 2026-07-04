@@ -48,6 +48,7 @@ typedef struct {
     pm_slot_t       slots[PM_MAX_PLUGINS];
     vfs_t           vfs;   /* plugin sources: ramdisk + SD (issue #34) */
     graph_control_t *gc;   /* optional: graph wiring (issue #28)        */
+    uint32_t        quota_pages; /* per-plugin memory budget, 0 = unlimited  */
 } plugin_mgr_t;
 
 /* Errors (negative). */
@@ -58,8 +59,14 @@ typedef struct {
 #define PM_EFULL   (-4)   /* parameter queue full        */
 #define PM_EABI    (-5)   /* wrong plugin ABI version    */
 #define PM_EIMPORT (-6)   /* disallowed import symbol(s) */
+#define PM_EQUOTA  (-7)   /* declared footprint over the memory quota    */
 
 void pm_init(plugin_mgr_t *m, graph_control_t *gc);
+
+/* Set the per-plugin memory budget in 4 KiB pages (0 = unlimited).  A plugin
+ * whose declared footprint exceeds this is refused at load (PM_EQUOTA), before
+ * any frame is committed (Theme A: reliability). */
+void pm_set_quota(plugin_mgr_t *m, uint32_t pages);
 
 /* Register a ramdisk plugin image under `name` (loadable as "<name>" or
  * "/rd/<name>"). */

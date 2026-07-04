@@ -66,10 +66,55 @@ Safe-mode bypass is the audible sequel to the M8 resilience demo and the M12
 budget kill: those *catch and kill* a bad plugin; safe-mode bypass is what the
 audio path *does* in that moment so it never falls silent.
 
+## Per-plugin memory quota
+
+The M12 CPU budget bounds the *time* a plugin may take; this bounds the *memory*
+it may hold, completing the resource-isolation story - memory, time, and
+syscalls all bounded per plugin.
+
+A plugin's footprint is fixed at load: its ELF PT_LOAD segments (including
+`.bss`) plus the fixed stack, trampoline, param, and parameter-queue pages.
+Plugins cannot allocate at runtime - there is no such syscall. So the quota is
+enforced at load time on the image's **declared** page count, computed from the
+program headers (`elf64_load_pages`), **before a single frame is committed**: a
+plugin whose footprint exceeds its budget is refused with `PM_EQUOTA`, so a
+greedy or hostile image cannot exhaust physical memory and starve the audio
+engine or the other plugins. The budget is set with `pm_set_quota(m, pages)`
+(0 = unlimited, the default, so existing behaviour is unchanged).
+
+### How it is reproduced
+
+```
+# Pure charge/limit accounting (host, deterministic):
+make test-arm-mem-quota
+
+# End to end on QEMU virt:
+make test-arm-mem-quota-qemu CROSS_COMPILE=aarch64-linux-gnu-
+```
+
+The QEMU harness (`tests/arm64/virt/mem_quota_main.c`) sets a 32-page budget and
+loads two images: the small reference low-pass (3 PT_LOAD pages) and a greedy
+plugin with a 256 KiB `.bss` (65 PT_LOAD pages):
+
+```
+declared PT_LOAD pages: effect=3 greedy=65  quota=32 pages/plugin
+effect: load=1 runs=1
+greedy: rejected=1 (rc=-7) no-alloc-on-reject=1 loads-when-unlimited=1
+leak: baseline=32158 after=32158 no-leak=1
+MEM-QUOTA: PASS
+```
+
+- the small effect loads under budget and its `process_block` runs;
+- the greedy plugin is refused (`rc=-7` = `PM_EQUOTA`), and **not one physical
+  page was committed** for it (the free count is unchanged across the rejected
+  load);
+- with the budget lifted, the same image loads fine (a positive control: it was
+  the quota, not a broken plugin);
+- unloading everything returns the frame allocator exactly to baseline.
+
 ## Planned in this theme
 
 Further never-go-silent work (each to be built to the same bar - mechanism, host
 tests, a QEMU harness): glitch-free crossfaded patch switching, plugin
-hot-reload without a dropout, a crash black-box that persists the last blocks
-and the faulting plugin across a reboot, and per-plugin memory quotas
-(completing the resource-isolation story alongside the M12 CPU budget).
+hot-reload without a dropout, and a crash black-box that persists the last
+blocks and the faulting plugin across a reboot.

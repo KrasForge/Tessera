@@ -5,6 +5,7 @@
 #include "param_queue.h"
 #include "graph_control.h"
 #include "elf64.h"
+#include "mem_quota.h"
 #include "vfs.h"
 #include "process.h"
 #include "vmem.h"
@@ -27,6 +28,12 @@ void pm_init(plugin_mgr_t *m, graph_control_t *gc)
     }
     vfs_init(&m->vfs);
     m->gc = gc;
+    m->quota_pages = 0;          /* unlimited until pm_set_quota() (Theme A) */
+}
+
+void pm_set_quota(plugin_mgr_t *m, uint32_t pages)
+{
+    m->quota_pages = pages;      /* 0 = unlimited */
 }
 
 int pm_register_blob(plugin_mgr_t *m, const char *name, void *blob, size_t len)
@@ -86,6 +93,22 @@ long pm_load(plugin_mgr_t *m, const char *path)
     if (elf64_disallowed_imports(elf, (size_t)n, (const char *const *)0, 0) != 0) {
         if (scratch_pa) phys_free_contig(scratch_pa, PM_SCRATCH_PAGES);
         return PM_EIMPORT;
+    }
+
+    /* Per-plugin memory quota (Theme A: reliability).  Refuse an image whose
+     * declared footprint - its PT_LOAD pages (including .bss) plus the fixed
+     * stack / trampoline / param / parameter-queue pages - exceeds the budget,
+     * before a single frame is committed.  A greedy or hostile image cannot
+     * exhaust physical memory and starve the audio engine or the other plugins. */
+    if (m->quota_pages) {
+        uint32_t pqpages  = mq_bytes_to_pages(pq_bytes(PM_PARAM_CAP));
+        uint32_t declared = elf64_load_pages(elf, (size_t)n) + 3u + pqpages;
+        mem_quota_t q;
+        mq_init(&q, m->quota_pages);
+        if (!mq_charge(&q, declared)) {
+            if (scratch_pa) phys_free_contig(scratch_pa, PM_SCRATCH_PAGES);
+            return PM_EQUOTA;
+        }
     }
 
     int lr = plugin_load(&s->plugin, elf, (size_t)n, path);

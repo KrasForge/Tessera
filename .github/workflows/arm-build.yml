@@ -541,6 +541,12 @@ jobs:
       - name: Never-go-silent safe-mode bypass on QEMU virt (effect dies -> dry passthrough)
         run: make test-arm-safe-bypass-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Memory-quota host unit tests (charge/limit accounting, ASan + UBSan)
+        run: make test-arm-mem-quota
+
+      - name: Per-plugin memory quota on QEMU virt (greedy plugin refused at load)
+        run: make test-arm-mem-quota-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   sdk-tests:
     name: M9 plugin SDK - lib host test + build example from SDK + run on QEMU virt
     runs-on: ubuntu-22.04

@@ -90,6 +90,11 @@ int elf64_validate(const void *img, size_t len);
 uint16_t          elf64_phnum(const void *img, size_t len);
 const Elf64_Phdr *elf64_phdr(const void *img, size_t len, uint16_t i);
 
+/* Total 4 KiB pages the PT_LOAD segments will span once mapped (including
+ * .bss, i.e. based on p_memsz).  The declared memory footprint of the image,
+ * used to enforce a load-time memory quota before any frame is committed. */
+uint32_t          elf64_load_pages(const void *img, size_t len);
+
 /* Entry point VA from the header. */
 uint64_t elf64_entry(const void *img);
 

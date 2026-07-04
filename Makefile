@@ -544,6 +544,17 @@ test-arm-safe-bypass: | $(ARM_BUILD_DIR)
 	      $(ARM_SB_TEST_SRCS) -o $(ARM_SB_TEST_BIN)
 	$(ARM_SB_TEST_BIN)
 
+# Host unit tests for the per-plugin memory quota (Theme A: reliability): the
+# charge/limit accounting that refuses an over-budget plugin at load.
+ARM_MQ_TEST_SRCS = tests/arm64/mem_quota_test.c
+ARM_MQ_TEST_BIN  = $(ARM_BUILD_DIR)/mem_quota_test
+
+test-arm-mem-quota: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_MQ_TEST_SRCS) -o $(ARM_MQ_TEST_BIN)
+	$(ARM_MQ_TEST_BIN)
+
 # Host unit tests for the ELF64 reader (issue #24).
 ARM_ELF_TEST_SRCS = tests/arm64/elf_test.c $(ARCH_ARM_DIR)/elf64.c
 ARM_ELF_TEST_BIN  = $(ARM_BUILD_DIR)/elf_test
@@ -1266,6 +1277,57 @@ test-arm-safe-bypass-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf \
 	  && echo "QEMU virt safe-bypass test PASSED" \
 	  || { echo "QEMU virt safe-bypass test FAILED"; exit 1; }
 
+# Per-plugin memory quota on QEMU 'virt' (Theme A: reliability): MMU on, single
+# core.  A greedy plugin (large .bss) is refused at load (PM_EQUOTA) with no
+# frame committed, while the small effect loads and runs; lifting the budget
+# lets the same greedy image load (positive control); no leak.
+VIRT_MQ_ELF  = $(ARM_BUILD_DIR)/virt_mem_quota.elf
+VIRT_MQ_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+               $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+               $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+               $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+               $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+               $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c \
+               $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c \
+               $(ARCH_ARM_DIR)/sandbox.c $(ARCH_ARM_DIR)/string.c
+
+test-arm-mem-quota-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf \
+                         $(ARM_BUILD_DIR)/plugin_greedy.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/mq_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/mq_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/mq_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/mq_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/mem_quota_blob.S       -o $(ARM_BUILD_DIR)/mq_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/mq_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iinclude -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/mem_quota_main.c -o $(ARM_BUILD_DIR)/mq_main.o
+	for s in $(VIRT_MQ_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/mq_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -Iinclude -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_MQ_ELF) \
+	    $(ARM_BUILD_DIR)/mq_start.o $(ARM_BUILD_DIR)/mq_main.o \
+	    $(ARM_BUILD_DIR)/mq_uart.o $(ARM_BUILD_DIR)/mq_vectors.o \
+	    $(ARM_BUILD_DIR)/mq_entry.o $(ARM_BUILD_DIR)/mq_tramp.o \
+	    $(ARM_BUILD_DIR)/mq_blob.o \
+	    $(ARM_BUILD_DIR)/mq_pmm.o $(ARM_BUILD_DIR)/mq_mmu.o \
+	    $(ARM_BUILD_DIR)/mq_vmem.o $(ARM_BUILD_DIR)/mq_process.o \
+	    $(ARM_BUILD_DIR)/mq_exceptions.o $(ARM_BUILD_DIR)/mq_syscalls.o \
+	    $(ARM_BUILD_DIR)/mq_elf64.o $(ARM_BUILD_DIR)/mq_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/mq_audio_ringbuf.o $(ARM_BUILD_DIR)/mq_audio_graph.o \
+	    $(ARM_BUILD_DIR)/mq_graph_control.o $(ARM_BUILD_DIR)/mq_param_queue.o \
+	    $(ARM_BUILD_DIR)/mq_plugin_mgr.o $(ARM_BUILD_DIR)/mq_patch.o \
+	    $(ARM_BUILD_DIR)/mq_vfs.o $(ARM_BUILD_DIR)/mq_fat.o \
+	    $(ARM_BUILD_DIR)/mq_sandbox.o $(ARM_BUILD_DIR)/mq_string.o
+	rm -f $(ARM_BUILD_DIR)/virt_mem_quota.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_mem_quota.log -net none \
+	    -kernel $(VIRT_MQ_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_mem_quota.log
+	@grep -q "MEM-QUOTA: PASS" $(ARM_BUILD_DIR)/virt_mem_quota.log \
+	  && echo "QEMU virt mem-quota test PASSED" \
+	  || { echo "QEMU virt mem-quota test FAILED"; exit 1; }
+
 # ---- M7: live parameter changes (issue #33) -------------------------------
 # Integration host test: CC -> param map -> lock-free queue -> filter, checking
 # click-free modulation, overflow handling, and latency.  Uses libm for the
@@ -1412,6 +1474,10 @@ $(ARM_BUILD_DIR)/plugin_good.elf: plugins/test/good_plugin.c audio/sine_gen.c $(
 $(ARM_BUILD_DIR)/plugin_crash.elf: plugins/test/crash_plugin.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/crash_plugin.o
 	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/crash_plugin.o
+
+$(ARM_BUILD_DIR)/plugin_greedy.elf: plugins/test/greedy_plugin.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/greedy_plugin.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/greedy_plugin.o
 
 $(ARM_BUILD_DIR)/plugin_evil2.elf: plugins/test/evil_plugin.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/evil_plugin.o
