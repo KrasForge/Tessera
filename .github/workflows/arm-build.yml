@@ -240,6 +240,9 @@ jobs:
       - name: Per-plugin profiler host unit tests (load/headroom aggregation, ASan + UBSan)
         run: make test-arm-profiler
 
+      - name: Denormal-protection host unit tests (FPCR FTZ + subnormal flush, ASan + UBSan)
+        run: make test-arm-denorm
+
       - name: Budget enforcement on QEMU virt (preempt at boundary, mute, kill)
         run: make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
