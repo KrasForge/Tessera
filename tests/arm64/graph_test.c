@@ -247,6 +247,55 @@ static void test_channels(void)
     CHECK(audio_graph_edge_channels(&g2, 99) == 0, "out-of-range edge -> 0 channels");
 }
 
+static void test_pdc(void)
+{
+    printf("- plugin delay compensation aligns parallel paths (#190)\n");
+    uint32_t comp[GRAPH_MAX_EDGES];
+    uint32_t total;
+
+    /* Two parallel paths into the DAC: input -> A (latency 100) -> DAC, and
+     * input -> B (latency 0) -> DAC.  The B path must be padded by 100. */
+    audio_graph_t g;
+    audio_graph_init(&g, valid_pid);
+    int in  = audio_graph_add_input(&g);
+    int A   = audio_graph_add_node(&g, 1);
+    int B   = audio_graph_add_node(&g, 2);
+    int dac = audio_graph_add_dac(&g);
+    audio_graph_set_latency(&g, A, 100);
+    audio_graph_connect(&g, in, A);
+    audio_graph_connect(&g, in, B);
+    int eAd = audio_graph_connect(&g, A, dac);
+    int eBd = audio_graph_connect(&g, B, dac);
+
+    CHECK(audio_graph_pdc(&g, comp, &total) == 0, "pdc computed");
+    CHECK(comp[eAd] == 0,   "the high-latency path needs no compensation");
+    CHECK(comp[eBd] == 100, "the low-latency path is padded to match (100 samples)");
+    CHECK(total == 100, "total graph latency is the aligned DAC latency");
+
+    /* A graph with no latency needs no compensation at all. */
+    audio_graph_t g2;
+    audio_graph_init(&g2, valid_pid);
+    int s = audio_graph_add_node(&g2, 1);
+    int d2 = audio_graph_add_dac(&g2);
+    int e = audio_graph_connect(&g2, s, d2);
+    audio_graph_pdc(&g2, comp, &total);
+    CHECK(comp[e] == 0 && total == 0, "a latency-free graph adds zero compensation");
+
+    /* A series chain accumulates latency but needs no compensation (one path). */
+    audio_graph_t g3;
+    audio_graph_init(&g3, valid_pid);
+    int x = audio_graph_add_node(&g3, 1);
+    int y = audio_graph_add_node(&g3, 2);
+    int d3 = audio_graph_add_dac(&g3);
+    audio_graph_set_latency(&g3, x, 100);
+    audio_graph_set_latency(&g3, y, 50);
+    int exy = audio_graph_connect(&g3, x, y);
+    int eyd = audio_graph_connect(&g3, y, d3);
+    audio_graph_pdc(&g3, comp, &total);
+    CHECK(comp[exy] == 0 && comp[eyd] == 0, "a single chain needs no compensation");
+    CHECK(total == 150, "series latency accumulates (100 + 50)");
+}
+
 int main(void)
 {
     printf("=== Tessera audio-graph tests (issue #27) ===\n");
@@ -259,6 +308,7 @@ int main(void)
     test_input_node();
     test_feedback_edges();
     test_channels();
+    test_pdc();
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;
 }

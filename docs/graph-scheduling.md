@@ -161,6 +161,25 @@ int16 PCM blocks, so the mixer, send/return, and gain/pan graph nodes run on the
 
 Covered by `make test-arm-mixer`.
 
+## Plugin delay compensation (issue #190)
+
+Some nodes take time: the master limiter's look-ahead (#166), an FFT block, a
+convolution. When paths of different latency are summed - parallel chains, a
+wet/dry split, a send/return - the shorter path arrives early and the signals
+comb-filter. Plugin delay compensation keeps the graph phase-correct.
+
+Each node declares its processing latency in samples (`audio_graph_set_latency`).
+`audio_graph_pdc` walks the graph in topological order and computes, for every
+node, the latency at its output; a node's inputs are aligned to the
+latest-arriving one, and each earlier input edge is padded up to that arrival
+(`edge_comp[e]` samples). So at a summing node every input lands phase-aligned,
+and `*out_total` reports the graph's total latency at the DAC (the figure a host
+publishes for round-trip). Feedback edges are exempt - they intentionally carry
+the previous block - exactly as in the toposort, and a latency-free graph adds
+zero compensation. Pure integer graph analysis, host-tested.
+
+Covered by `make test-arm-graph`.
+
 ## Master limiter / soft-clip (issue #166)
 
 A product must not clip its DAC, so the platform offers a master output stage a
