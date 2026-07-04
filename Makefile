@@ -533,6 +533,17 @@ test-arm-latency: | $(ARM_BUILD_DIR)
 	      $(ARM_LAT_TEST_SRCS) -o $(ARM_LAT_TEST_BIN)
 	$(ARM_LAT_TEST_BIN)
 
+# Host unit tests for safe-mode bypass (Theme A: reliability): the resolve
+# logic that keeps the DAC fed (dry passthrough) when an effect dies.
+ARM_SB_TEST_SRCS = tests/arm64/safe_bypass_test.c $(ARCH_ARM_DIR)/safe_bypass.c
+ARM_SB_TEST_BIN  = $(ARM_BUILD_DIR)/safe_bypass_test
+
+test-arm-safe-bypass: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_SB_TEST_SRCS) -o $(ARM_SB_TEST_BIN)
+	$(ARM_SB_TEST_BIN)
+
 # Host unit tests for the ELF64 reader (issue #24).
 ARM_ELF_TEST_SRCS = tests/arm64/elf_test.c $(ARCH_ARM_DIR)/elf64.c
 ARM_ELF_TEST_BIN  = $(ARM_BUILD_DIR)/elf_test
@@ -1200,6 +1211,60 @@ test-arm-roundtrip-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf
 	@grep -q "ROUNDTRIP: PASS" $(ARM_BUILD_DIR)/virt_roundtrip.log \
 	  && echo "QEMU virt round-trip test PASSED" \
 	  || { echo "QEMU virt round-trip test FAILED"; exit 1; }
+
+# Never-go-silent safe-mode bypass on QEMU 'virt' (Theme A: reliability): MMU
+# on, single core.  input -> effect -> DAC carries audio; the effect suffers a
+# real EL0 fault (the M8 crash plugin) mid-stream; the platform routes the dry
+# input to the DAC so it never goes silent, bit-exactly clean-through.
+VIRT_SAFEB_ELF  = $(ARM_BUILD_DIR)/virt_safe_bypass.elf
+VIRT_SAFEB_SRCS = $(ARCH_ARM_DIR)/pmm.c $(ARCH_ARM_DIR)/mmu.c \
+               $(ARCH_ARM_DIR)/vmem.c $(ARCH_ARM_DIR)/process.c \
+               $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/syscalls.c \
+               $(ARCH_ARM_DIR)/elf64.c $(ARCH_ARM_DIR)/plugin_loader.c \
+               $(ARCH_ARM_DIR)/audio_ringbuf.c $(ARCH_ARM_DIR)/audio_graph.c \
+               $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/param_queue.c \
+               $(ARCH_ARM_DIR)/plugin_mgr.c $(ARCH_ARM_DIR)/patch.c \
+               $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c \
+               $(ARCH_ARM_DIR)/sandbox.c $(ARCH_ARM_DIR)/string.c \
+               $(ARCH_ARM_DIR)/safe_bypass.c
+
+test-arm-safe-bypass-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf \
+                           $(ARM_BUILD_DIR)/plugin_crash.elf
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/sfb_start.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S          -o $(ARM_BUILD_DIR)/sfb_vectors.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/entry.S            -o $(ARM_BUILD_DIR)/sfb_entry.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/sfb_tramp.o
+	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/safe_bypass_blob.S     -o $(ARM_BUILD_DIR)/sfb_blob.o
+	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/sfb_uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iinclude -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -c $(VIRT_DIR)/safe_bypass_main.c -o $(ARM_BUILD_DIR)/sfb_main.o
+	$(ARM_CC) $(ARM_TARGET_FLAGS) -mcpu=$(ARM_CPU) -ffreestanding -fno-pic -fno-pie -O2 -std=c11 -Iinclude -c $(VIRT_DIR)/sb_conv.c -o $(ARM_BUILD_DIR)/sfb_conv.o
+	for s in $(VIRT_SAFEB_SRCS); do \
+	  o=$(ARM_BUILD_DIR)/sfb_$$(basename $${s%.c}).o; \
+	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) -Iinclude -c $$s -o $$o || exit 1; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(VIRT_SAFEB_ELF) \
+	    $(ARM_BUILD_DIR)/sfb_start.o $(ARM_BUILD_DIR)/sfb_main.o \
+	    $(ARM_BUILD_DIR)/sfb_uart.o $(ARM_BUILD_DIR)/sfb_vectors.o \
+	    $(ARM_BUILD_DIR)/sfb_entry.o $(ARM_BUILD_DIR)/sfb_tramp.o \
+	    $(ARM_BUILD_DIR)/sfb_blob.o \
+	    $(ARM_BUILD_DIR)/sfb_pmm.o $(ARM_BUILD_DIR)/sfb_mmu.o \
+	    $(ARM_BUILD_DIR)/sfb_vmem.o $(ARM_BUILD_DIR)/sfb_process.o \
+	    $(ARM_BUILD_DIR)/sfb_exceptions.o $(ARM_BUILD_DIR)/sfb_syscalls.o \
+	    $(ARM_BUILD_DIR)/sfb_elf64.o $(ARM_BUILD_DIR)/sfb_plugin_loader.o \
+	    $(ARM_BUILD_DIR)/sfb_audio_ringbuf.o $(ARM_BUILD_DIR)/sfb_audio_graph.o \
+	    $(ARM_BUILD_DIR)/sfb_graph_control.o $(ARM_BUILD_DIR)/sfb_param_queue.o \
+	    $(ARM_BUILD_DIR)/sfb_plugin_mgr.o $(ARM_BUILD_DIR)/sfb_patch.o \
+	    $(ARM_BUILD_DIR)/sfb_vfs.o $(ARM_BUILD_DIR)/sfb_fat.o \
+	    $(ARM_BUILD_DIR)/sfb_sandbox.o $(ARM_BUILD_DIR)/sfb_string.o \
+	    $(ARM_BUILD_DIR)/sfb_safe_bypass.o $(ARM_BUILD_DIR)/sfb_conv.o
+	rm -f $(ARM_BUILD_DIR)/virt_safe_bypass.log
+	-timeout 25 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_safe_bypass.log -net none \
+	    -kernel $(VIRT_SAFEB_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_safe_bypass.log
+	@grep -q "SAFE-BYPASS: PASS" $(ARM_BUILD_DIR)/virt_safe_bypass.log \
+	  && echo "QEMU virt safe-bypass test PASSED" \
+	  || { echo "QEMU virt safe-bypass test FAILED"; exit 1; }
 
 # ---- M7: live parameter changes (issue #33) -------------------------------
 # Integration host test: CC -> param map -> lock-free queue -> filter, checking
