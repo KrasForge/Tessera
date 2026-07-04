@@ -161,6 +161,25 @@ int16 PCM blocks, so the mixer, send/return, and gain/pan graph nodes run on the
 
 Covered by `make test-arm-mixer`.
 
+## Master limiter / soft-clip (issue #166)
+
+A product must not clip its DAC, so the platform offers a master output stage a
+builder can put on the bus instead of every plugin re-implementing one
+(`arch/arm64/limiter.c`).
+
+The limiter is **look-ahead**: it delays the signal by a short window and, over
+that window, applies the *minimum* gain needed so no sample in it can exceed the
+ceiling. Because the applied gain is the windowed minimum (computed including the
+sample about to leave the delay), the delayed output is provably bounded to
+`±ceiling` - a true brick wall, no overshoot - while the gain still recovers
+smoothly (release) between peaks. `limiter_softclip` is a separate stateless
+soft-knee curve: transparent (bit-exact) below `0.8 × ceiling`, then rounding
+smoothly toward the ceiling for the last dB when a builder wants musical
+saturation rather than a hard wall. Q15 fixed-point on int16 PCM, so it runs on
+the audio path; the caller owns the look-ahead buffers.
+
+Covered by `make test-arm-limiter`.
+
 ## Multi-channel buses (issue #119)
 
 Edges are stereo by default, but a node can declare its own input and output
