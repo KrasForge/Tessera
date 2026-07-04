@@ -68,6 +68,15 @@ void transport_stop(transport_t *t);      /* 0xFC: pause                 */
  * block).  Accumulates MIDI-clock-out pulses. */
 void transport_advance(transport_t *t, uint32_t n_frames);
 
+/* Sample-accurate scheduling (issue #199): the frame within the current block
+ * at which the transport reaches `tick_delta` internal ticks past the block's
+ * starting position, given the sub-tick remainder carried into the block.  The
+ * exact integer inverse of transport_advance, so an event scheduled on the
+ * tempo grid lands on the precise sample (use as tessera_note_event_t's
+ * frame_offset).  A tick beyond this block returns an offset >= the block size;
+ * clamp against the block at the call site. */
+uint32_t transport_frame_at_tick(const transport_t *t, uint32_t tick_delta);
+
 /* Slave to an incoming MIDI clock (0xF8): advance one 24-PPQN tick and, given
  * the frames elapsed since the previous clock, estimate and set the tempo. */
 void transport_midi_clock_in(transport_t *t, uint32_t frames_since_last);

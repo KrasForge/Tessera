@@ -462,3 +462,31 @@ these events: under MPE each note is on its own channel, so the decoder tracks t
 active note per channel and tags that channel's pitch bend, channel pressure, and
 CC 74 onto it. The MIDI parser now also emits `MIDI_PITCHBEND` and `MIDI_PRESSURE`
 (previously parsed but dropped). Covered by `make test-arm-mpe`.
+
+## ABI v1.3: sample-accurate event scheduling (Theme M22, issue #199)
+
+v1.1/v1.2 deliver and apply events **per block** - every event in a block takes
+effect at the block boundary, so timing quantises to the block size (a few
+milliseconds). v1.3 lets an event apply at the **exact sample** within its block.
+
+- The `tessera_note_event_t` field previously reserved as `_pad` becomes
+  **`frame_offset`** (`uint16_t`, `0..block_size-1`): the sample within the block
+  at which the event takes effect. The struct is **unchanged at 8 bytes** and no
+  other field moved, so this is a purely additive minor bump. A v1.2 host wrote
+  `0` into that padding, which now reads as "block start" - **exactly the old
+  per-block behaviour**, so a v1.2 plugin is bit-for-bit unaffected.
+- A plugin that ignores `frame_offset` and drains the whole queue at the top of
+  `process_block` behaves exactly as before. A plugin that wants sample accuracy
+  renders the block in segments split at event boundaries. The SDK provides the
+  splitter (`tessera_event_split_init` / `tessera_event_split_next` in
+  `libtessera.a`): it drains events in order with a one-event lookahead and hands
+  back each `[start, start+len)` segment to render before the boundary event is
+  applied. Out-of-order or out-of-range offsets are clamped into `[cursor, block]`,
+  so the loop is always safe and terminating.
+- The host derives an event's `frame_offset` from the transport's exact integer
+  tick accounting via `transport_frame_at_tick` (`arch/arm64/transport.c`) - the
+  precise inverse of `transport_advance` - so events scheduled on the tempo grid
+  land on the exact sample with no drift.
+
+The minor bump keeps older plugins compatible per `tessera_abi_compatible` (major
+equal, minor `<=`). Covered by `make test-arm-events`.

@@ -666,6 +666,9 @@ jobs:
       - name: SDK library host unit tests (sinf/clampf/param-queue, ASan + UBSan)
         run: make test-sdk
 
+      - name: Sample-accurate event scheduling host unit tests (frame_offset splitter + transport inverse, ASan + UBSan)
+        run: make test-arm-events
+
       - name: SDK DSP building-block host unit tests (biquad/osc/delay/env/adsr, ASan + UBSan)
         run: make test-arm-dsp
 
