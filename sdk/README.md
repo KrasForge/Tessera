@@ -52,6 +52,18 @@ DSP by hand (still allocation-free and libc-free):
 
 Declarations and doc comments are in [`tessera.h`](tessera.h); the suite is
 unit-tested by `make test-arm-fx`.
+
+### IR convolution (cabinet sim)
+
+- **`tessera_conv_*`** - a time-domain FIR that convolves the signal against an
+  impulse response (a guitar cabinet, a room, a filter kernel). This is the
+  deliberately *heavy* block: a few-thousand-tap IR costs real CPU every block,
+  so a cabinet-sim plugin built on it exercises the M12 CPU budget and the
+  process isolation under genuine load. Real-time safe - exactly `ir_len`
+  multiply-adds per sample, and the caller owns both the IR and the history ring
+  (`tessera_conv_normgain` gives the worst-case gain for pre-scaling).
+
+Unit-tested by `make test-arm-conv`.
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |

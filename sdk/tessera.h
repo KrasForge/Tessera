@@ -306,6 +306,26 @@ void  tessera_fx_reverb_init(tessera_fx_reverb_t *r,
                              float feedback, float damp, float mix);
 float tessera_fx_reverb(tessera_fx_reverb_t *r, float x);
 
+/* ---- IR convolution (libtessera.a, Theme B, issue #112) ------------------ *
+ * A time-domain FIR: convolve the signal against an impulse response (a guitar
+ * cabinet, a room, a filter kernel).  Deliberately the heavy building block - a
+ * few-thousand-tap IR costs real CPU per block, exercising the M12 budget and
+ * the process isolation under load.  Real-time safe: exactly ir_len
+ * multiply-adds per sample, and the caller owns both the IR and the history ring
+ * (the SDK never allocates).  hist_len must be >= ir_len. */
+typedef struct {
+    const float *ir;
+    float       *hist;
+    uint32_t     ir_len, hist_len, w;
+} tessera_conv_t;
+void  tessera_conv_init (tessera_conv_t *c, const float *ir, uint32_t ir_len,
+                         float *hist, uint32_t hist_len);
+float tessera_conv      (tessera_conv_t *c, float x);
+void  tessera_conv_reset(tessera_conv_t *c);
+/* Worst-case (DC) gain of an IR - sum of |taps| - for pre-scaling to avoid
+ * clipping. */
+float tessera_conv_normgain(const float *ir, uint32_t ir_len);
+
 /* Tuner: estimate the fundamental of a block by interpolated upward
  * zero-crossings.  Call _process with each block, then _hz for the current
  * estimate (0 if too few crossings).  tessera_fx_note_of maps a frequency to
