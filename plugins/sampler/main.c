@@ -79,8 +79,9 @@ static void refill(void)
 int plugin_init(uint32_t sample_rate, uint32_t block_size)
 {
     (void)sample_rate; (void)block_size;   /* the bundled sample is rate-agnostic */
-    /* Build the bundled sample: a decaying sine over the buffer. */
-    tessera_osc_t o; tessera_osc_set(&o, (float)SAMPLE_LEN, 2.0f);   /* 2 cycles */
+    /* Build the bundled sample: a decaying sine over the buffer.  Zero-init the
+     * oscillator so its phase starts at 0 (osc_set only sets the increment). */
+    tessera_osc_t o = {0}; tessera_osc_set(&o, (float)SAMPLE_LEN, 2.0f);   /* 2 cycles */
     for (int i = 0; i < SAMPLE_LEN; i++) {
         float env = 1.0f - (float)i / (float)SAMPLE_LEN;             /* linear decay */
         g_sample[i] = tessera_osc_sin(&o) * env;

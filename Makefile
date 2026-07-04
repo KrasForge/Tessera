@@ -1316,6 +1316,33 @@ test-arm-ref-sampler: | $(ARM_BUILD_DIR)
 	      -Isdk -I$(ARCH_ARM_DIR) $(ARM_REFSAMP_TEST_SRCS) -o $(ARM_BUILD_DIR)/ref_sampler_test -lm
 	$(ARM_BUILD_DIR)/ref_sampler_test
 
+# Golden-audio regression (Theme M16, #168): render each reference plugin over a
+# fixed deterministic input + automation and compare against a committed
+# reference render (RMS-difference tolerance).  `golden-bless` regenerates the
+# references after an intentional change.
+GOLDEN_FILTER_SRCS  = tools/golden_check.c plugins/effect_filter/main.c
+GOLDEN_SYNTH_SRCS   = tools/golden_check.c plugins/synth_fm/main.c sdk/lib/tessera_synth.c $(SDK_DSP_SRCS)
+GOLDEN_SAMPLER_SRCS = tools/golden_check.c plugins/sampler/main.c sdk/lib/tessera_sampler.c $(SDK_DSP_SRCS)
+
+$(ARM_BUILD_DIR)/golden_filter:  $(GOLDEN_FILTER_SRCS)  | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O2 -DHOSTTEST -Isdk -Iinclude $(GOLDEN_FILTER_SRCS)  -o $@ -lm
+$(ARM_BUILD_DIR)/golden_synth:   $(GOLDEN_SYNTH_SRCS)   | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O2 -DHOSTTEST -Isdk $(GOLDEN_SYNTH_SRCS)   -o $@ -lm
+$(ARM_BUILD_DIR)/golden_sampler: $(GOLDEN_SAMPLER_SRCS) | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O2 -DHOSTTEST -Isdk $(GOLDEN_SAMPLER_SRCS) -o $@ -lm
+
+golden-build: $(ARM_BUILD_DIR)/golden_filter $(ARM_BUILD_DIR)/golden_synth $(ARM_BUILD_DIR)/golden_sampler
+
+test-arm-golden: golden-build
+	$(ARM_BUILD_DIR)/golden_filter  tests/golden/filter.csv  tests/golden/filter.pcm
+	$(ARM_BUILD_DIR)/golden_synth   tests/golden/synth.csv   tests/golden/synth.pcm
+	$(ARM_BUILD_DIR)/golden_sampler tests/golden/sampler.csv tests/golden/sampler.pcm
+
+golden-bless: golden-build
+	$(ARM_BUILD_DIR)/golden_filter  tests/golden/filter.csv  tests/golden/filter.pcm  --bless
+	$(ARM_BUILD_DIR)/golden_synth   tests/golden/synth.csv   tests/golden/synth.pcm   --bless
+	$(ARM_BUILD_DIR)/golden_sampler tests/golden/sampler.csv tests/golden/sampler.pcm --bless
+
 # Standalone AArch64 ELF for the filter plugin (and the other example plugins).
 $(ARM_BUILD_DIR)/plugin_effect_filter.elf: plugins/effect_filter/main.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/effect_filter.o

@@ -663,6 +663,9 @@ jobs:
       - name: Reference plugins render through the offline host (build/link check)
         run: make offline-host-synth offline-host-sampler
 
+      - name: Golden-audio regression (reference plugins render bit-stable vs committed)
+        run: make test-arm-golden
+
       - name: SDK effects-suite host unit tests (overdrive/comp/EQ/delay/chorus/gate/reverb/tuner, ASan + UBSan)
         run: make test-arm-fx
 
