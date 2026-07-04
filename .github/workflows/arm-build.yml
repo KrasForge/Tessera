@@ -654,6 +654,15 @@ jobs:
       - name: SDK streaming-sampler host unit tests (pitch/loop/bounded-mem/underrun, ASan + UBSan)
         run: make test-arm-sampler
 
+      - name: Reference FM-synth plugin host test (pitch/audio/presets, ASan + UBSan)
+        run: make test-arm-ref-synth
+
+      - name: Reference sampler plugin host test (play/gate/bounded/presets, ASan + UBSan)
+        run: make test-arm-ref-sampler
+
+      - name: Reference plugins render through the offline host (build/link check)
+        run: make offline-host-synth offline-host-sampler
+
       - name: SDK effects-suite host unit tests (overdrive/comp/EQ/delay/chorus/gate/reverb/tuner, ASan + UBSan)
         run: make test-arm-fx
 
