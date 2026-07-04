@@ -19,7 +19,8 @@ void tessera_mpe_init(tessera_mpe_t *m)
 static tessera_note_event_t mk(uint8_t type, uint8_t ch, uint8_t d1, uint8_t d2, int16_t val)
 {
     tessera_note_event_t e;
-    e.type = type; e.channel = ch; e.data1 = d1; e.data2 = d2; e.value = val; e._pad = 0;
+    e.type = type; e.channel = ch; e.data1 = d1; e.data2 = d2; e.value = val;
+    e.frame_offset = 0;   /* decoded events default to block start (issue #199) */
     return e;
 }
 

@@ -141,8 +141,20 @@ typedef struct {
     uint8_t  data1;    /* note number / CC number                       */
     uint8_t  data2;    /* velocity / CC value / pressure / timbre       */
     int16_t  value;    /* high-res expression (pitch bend); 0 otherwise */
-    uint16_t _pad;     /* reserved, keeps the struct 8-byte sized       */
+    uint16_t frame_offset; /* v1.3: sample within the block, 0..block-1, at
+                            * which the event takes effect (0 = block start).
+                            * Occupies the field reserved as _pad through v1.2,
+                            * so the struct is unchanged at 8 bytes: a v1.2 host
+                            * wrote 0 here, which reads as "block start" -
+                            * exactly the old per-block behaviour (issue #199). */
 } tessera_note_event_t;
+
+/* ABI invariant: the event stays 8 bytes across the v1.1..v1.3 line, so adding
+ * frame_offset over the reserved padding shifted no field and grew no queue. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(tessera_note_event_t) == 8,
+               "tessera_note_event_t must remain 8 bytes (frozen event layout)");
+#endif
 
 /* Transport snapshot for the current block. */
 #define TESSERA_TRANSPORT_PLAYING 1u
@@ -179,6 +191,48 @@ int  tessera_event_read(tessera_event_queue_t *q, tessera_note_event_t *ev);
 
 /* Copy the current-block transport snapshot into *out (zeroed if unavailable). */
 void tessera_transport_read(const tessera_event_queue_t *q, tessera_transport_t *out);
+
+/* ---- sample-accurate event delivery (v1.3, issue #199) ------------------- *
+ * A plugin that ignores frame_offset and drains the whole queue at the top of
+ * process_block still works exactly as before (every event then applies at the
+ * block start).  A plugin that wants sample accuracy renders the block in
+ * segments split at event boundaries, applying each event at its exact frame.
+ * The splitter drives that loop: it drains the queue in order, keeping a
+ * one-event lookahead, and hands back the [start, start+len) segment to render
+ * before the boundary event (if any) is applied.  The host enqueues a block's
+ * events in ascending frame_offset order; an out-of-order or out-of-range
+ * offset is clamped into [cursor, block] so the loop is always safe and
+ * terminating.  No libc, no allocation, wait-free.
+ *
+ *   tessera_event_split_t sp;
+ *   tessera_event_split_init(&sp, TESSERA_EVENT_QUEUE, block);
+ *   uint32_t start, len;  tessera_note_event_t ev;  int have;
+ *   while (tessera_event_split_next(&sp, &start, &len, &ev, &have)) {
+ *       render(voice, outL + start, outR + start, len);  // len may be 0
+ *       if (have) apply(voice, &ev);                      // fires at start+len
+ *   }
+ */
+typedef struct {
+    tessera_event_queue_t *q;
+    uint32_t block;        /* block size in frames                         */
+    uint32_t cursor;       /* next unrendered frame                        */
+    tessera_note_event_t look;  /* one drained-but-unapplied lookahead event */
+    int      have_look;    /* look holds a valid event                     */
+    int      done;         /* the block has been fully rendered            */
+} tessera_event_split_t;
+
+/* Begin splitting `q`'s events across a block of `block` frames. */
+void tessera_event_split_init(tessera_event_split_t *sp,
+                              tessera_event_queue_t *q, uint32_t block);
+
+/* Yield the next render segment.  On return 1: render frames
+ * [*start, *start + *len) with the current voice state (len may be 0 for
+ * back-to-back events at one frame), then if *have_event is non-zero apply
+ * *ev - it takes effect at frame *start + *len.  Returns 0 once the block is
+ * fully rendered. */
+int tessera_event_split_next(tessera_event_split_t *sp,
+                             uint32_t *start, uint32_t *len,
+                             tessera_note_event_t *ev, int *have_event);
 
 /* ---- DSP building blocks (libtessera.a) ---------------------------------- *
  * Real-time-safe primitives so authors do not start from sinf and a bare

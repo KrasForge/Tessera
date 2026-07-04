@@ -70,11 +70,12 @@ int main(void)
     q.hdr.magic = 0; q.hdr.head = 4;
     CHECK(tessera_param_queue_read(&q.hdr, &id, &v) == 0, "queue read: bad magic -> 0");
 
-    /* ---- ABI compat: v1.1 events (issue #124), v1.2 per-note expression (#171) ---- */
+    /* ---- ABI compat: v1.1 events (#124), v1.2 per-note (#171), v1.3 frame_offset (#199) ---- */
     CHECK(tessera_abi_compatible((1u << 16) | 0u) == 1, "v1.0 plugin accepted on this host");
     CHECK(tessera_abi_compatible((1u << 16) | 1u) == 1, "v1.1 plugin accepted");
-    CHECK(tessera_abi_compatible((1u << 16) | 2u) == 1, "v1.2 plugin accepted (current minor)");
-    CHECK(tessera_abi_compatible((1u << 16) | 3u) == 0, "v1.3 (newer minor) refused");
+    CHECK(tessera_abi_compatible((1u << 16) | 2u) == 1, "v1.2 plugin accepted");
+    CHECK(tessera_abi_compatible((1u << 16) | 3u) == 1, "v1.3 plugin accepted (current minor)");
+    CHECK(tessera_abi_compatible((1u << 16) | 4u) == 0, "v1.4 (newer minor) refused");
     CHECK(tessera_abi_compatible((2u << 16) | 0u) == 0, "v2.0 (newer major) refused");
 
     struct {

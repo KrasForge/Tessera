@@ -77,6 +77,25 @@ void transport_advance(transport_t *t, uint32_t n_frames)
     if (whole) advance_ticks(t, whole);
 }
 
+uint32_t transport_frame_at_tick(const transport_t *t, uint32_t tick_delta)
+{
+    if (t->sr == 0u || t->tempo_mbpm == 0u)
+        return 0u;
+    /* Exact inverse of transport_advance's accounting.  After `f` frames from
+     * this block's start, the whole ticks advanced are
+     *     floor((f * TP_PPQ * tempo_mbpm + tick_rem) / (60000 * sr)).
+     * The smallest f at which that reaches `tick_delta` is
+     *     f = ceil((tick_delta * 60000 * sr - tick_rem) / (TP_PPQ * tempo_mbpm)),
+     * so an event scheduled `tick_delta` ticks past the block start lands on
+     * exactly the frame where the tempo grid crosses it. */
+    uint64_t need = (uint64_t)tick_delta * 60000u * t->sr;
+    if (need <= t->tick_rem)
+        return 0u;                                    /* already at/before f=0 */
+    uint64_t num = need - t->tick_rem;
+    uint64_t per = (uint64_t)TP_PPQ * t->tempo_mbpm;
+    return (uint32_t)((num + per - 1u) / per);         /* ceil division        */
+}
+
 void transport_midi_clock_in(transport_t *t, uint32_t frames_since_last)
 {
     t->clocked = 1u;

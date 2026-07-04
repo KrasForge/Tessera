@@ -43,3 +43,55 @@ void tessera_transport_read(const tessera_event_queue_t *q, tessera_transport_t 
      * read is consistent within process_block. */
     *out = q->transport;
 }
+
+/* ---- sample-accurate event delivery (v1.3, issue #199) ------------------- */
+
+void tessera_event_split_init(tessera_event_split_t *sp,
+                              tessera_event_queue_t *q, uint32_t block)
+{
+    sp->q         = q;
+    sp->block     = block;
+    sp->cursor    = 0;
+    sp->have_look = 0;
+    sp->done      = 0;
+}
+
+int tessera_event_split_next(tessera_event_split_t *sp,
+                             uint32_t *start, uint32_t *len,
+                             tessera_note_event_t *ev, int *have_event)
+{
+    if (sp->done)
+        return 0;
+
+    /* Pull one lookahead event if we do not already hold one. */
+    if (!sp->have_look)
+        sp->have_look = tessera_event_read(sp->q, &sp->look);
+
+    uint32_t seg_start = sp->cursor;
+
+    if (sp->have_look) {
+        /* The lookahead event is the boundary for this segment.  Clamp its
+         * offset into [cursor, block] so an out-of-order or out-of-range value
+         * cannot run the cursor backwards or past the block end. */
+        uint32_t off = sp->look.frame_offset;
+        if (off > sp->block)  off = sp->block;
+        if (off < sp->cursor) off = sp->cursor;
+
+        *start = seg_start;
+        *len   = off - seg_start;
+        if (ev) *ev = sp->look;
+        if (have_event) *have_event = 1;
+
+        sp->cursor    = off;
+        sp->have_look = 0;               /* consumed; applied at this boundary */
+        return 1;
+    }
+
+    /* No more events: render the tail of the block. */
+    *start = seg_start;
+    *len   = (sp->block > sp->cursor) ? sp->block - sp->cursor : 0u;
+    if (have_event) *have_event = 0;
+    sp->cursor = sp->block;
+    sp->done   = 1;
+    return 1;
+}

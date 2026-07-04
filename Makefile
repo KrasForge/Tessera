@@ -879,6 +879,18 @@ test-sdk: verify-sdk-abi-sync | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_SDK_TEST_SRCS) -o $(ARM_BUILD_DIR)/sdk_test -lm
 	$(ARM_BUILD_DIR)/sdk_test
 
+# Host unit tests for sample-accurate event scheduling (Theme M22, issue #199):
+# the SDK block splitter honours each event's frame_offset (note-on at frame N
+# changes the output at sample N; multiple events apply in order; offset 0 is
+# the old per-block behaviour), and transport_frame_at_tick is the exact
+# integer inverse of transport_advance.  Pure C, ASan/UBSan.
+ARM_EVENTS_TEST_SRCS = tests/arm64/events_test.c sdk/lib/tessera_event.c \
+                       $(ARCH_ARM_DIR)/transport.c
+test-arm-events: verify-sdk-abi-sync | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk -I$(ARCH_ARM_DIR) $(ARM_EVENTS_TEST_SRCS) -o $(ARM_BUILD_DIR)/events_test
+	$(ARM_BUILD_DIR)/events_test
+
 # Host unit tests for the SDK DSP building blocks (Theme B): biquads,
 # oscillators, delay line, envelope follower, ADSR, and the one-pole smoother.
 # The reference libm (-lm) is used only to generate test tones and check errors;
