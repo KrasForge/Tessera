@@ -201,6 +201,41 @@ float tessera_osc_saw     (tessera_osc_t *o);
 float tessera_osc_square  (tessera_osc_t *o);
 float tessera_osc_triangle(tessera_osc_t *o);
 
+/* ---- wavetable oscillator (Theme M15, issue #164) ------------------------ *
+ * Plays a single-cycle waveform table with linear interpolation.  To keep it
+ * free of gross aliasing across the range, the caller supplies a *mip stack*:
+ * one band-limited table per octave above `base_hz`, each with fewer harmonics
+ * than the last, and the oscillator selects the table safe for the current
+ * frequency.  A single-table stack (n_tables == 1) is the naive, non-band-limited
+ * case.  tessera_wt_bandlimit fills one table with a band-limited sawtooth of
+ * `n_harmonics`, so a caller can build a stack without shipping raw tables. */
+typedef struct {
+    const float *const *tables;   /* n_tables single-cycle tables of table_len */
+    int      n_tables;
+    int      table_len;
+    float    base_hz;             /* fundamental the lowest table is built for  */
+    float    sr;
+    float    phase, inc;
+    int      sel;                 /* currently selected table index             */
+} tessera_wavetable_t;
+void  tessera_wt_init (tessera_wavetable_t *wt, const float *const *tables,
+                       int n_tables, int table_len, float base_hz, float sr);
+void  tessera_wt_set_freq(tessera_wavetable_t *wt, float freq);
+float tessera_wt_process(tessera_wavetable_t *wt);
+/* Fill `table[len]` with a band-limited sawtooth using the first `n_harmonics`
+ * harmonics (sum of sin(k*phase)/k), normalised to roughly [-1, 1]. */
+void  tessera_wt_bandlimit(float *table, int len, int n_harmonics);
+
+/* ---- FM operators (Theme M15, issue #164) -------------------------------- *
+ * A phase-modulatable sine operator: tessera_fm_op_process adds `phase_mod`
+ * (in cycles) to the operator's phase before the sine, so operators can modulate
+ * each other.  tessera_fm2 is the classic two-operator voice: the modulator's
+ * output, scaled by `index`, phase-modulates the carrier. */
+typedef struct { float phase, inc; } tessera_fm_op_t;
+void  tessera_fm_op_set    (tessera_fm_op_t *op, float sr, float freq);
+float tessera_fm_op_process(tessera_fm_op_t *op, float phase_mod);
+float tessera_fm2(tessera_fm_op_t *carrier, tessera_fm_op_t *mod, float index);
+
 /* Fractional (linearly-interpolated) delay line.  The caller supplies the
  * backing buffer (`size` floats) - the SDK never allocates. */
 typedef struct { float *buf; uint32_t size, w; } tessera_delay_t;
@@ -313,12 +348,14 @@ float tessera_fx_reverb(tessera_fx_reverb_t *r, float x);
  * per-sample cost bounded by the (fixed) voice count.  The caller owns the voice
  * array, so polyphony is chosen at the call site. */
 typedef enum {
-    TESSERA_WAVE_SINE = 0, TESSERA_WAVE_SAW, TESSERA_WAVE_SQUARE, TESSERA_WAVE_TRIANGLE
+    TESSERA_WAVE_SINE = 0, TESSERA_WAVE_SAW, TESSERA_WAVE_SQUARE, TESSERA_WAVE_TRIANGLE,
+    TESSERA_WAVE_FM     /* two-operator FM (ratio/index set by tessera_synth_set_fm) */
 } tessera_wave_t;
 
 typedef struct {
-    tessera_osc_t  osc;
-    tessera_adsr_t adsr;
+    tessera_osc_t   osc;
+    tessera_fm_op_t fm_car, fm_mod;   /* carrier + modulator for TESSERA_WAVE_FM */
+    tessera_adsr_t  adsr;
     int      active;   /* 1 while sounding (through release)  */
     int      note;     /* MIDI note, or -1 when free          */
     float    gain;     /* velocity / 127                      */
@@ -331,6 +368,7 @@ typedef struct {
     float    sr;
     tessera_wave_t waveform;
     float    a_ms, d_ms, sustain, r_ms;   /* current patch envelope   */
+    float    fm_ratio, fm_index;           /* TESSERA_WAVE_FM settings */
     uint32_t age;                          /* monotonic alloc counter  */
 } tessera_synth_t;
 
@@ -344,6 +382,9 @@ void  tessera_synth_init(tessera_synth_t *s, tessera_voice_t *voices,
 /* Choose the waveform and ADSR patch applied to newly-triggered notes. */
 void  tessera_synth_set (tessera_synth_t *s, tessera_wave_t waveform,
                          float a_ms, float d_ms, float sustain, float r_ms);
+/* Set the FM modulator ratio (modulator freq / note freq) and index (modulation
+ * depth) used by TESSERA_WAVE_FM voices. */
+void  tessera_synth_set_fm(tessera_synth_t *s, float ratio, float index);
 /* Note on (velocity 0 is treated as note-off); allocates a free voice or steals
  * the quietest.  Note off releases every voice sounding that note. */
 void  tessera_synth_note_on (tessera_synth_t *s, int note, int velocity);

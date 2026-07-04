@@ -190,6 +190,92 @@ float tessera_osc_triangle(tessera_osc_t *o)
     return y;
 }
 
+/* ---- wavetable oscillator ------------------------------------------------ */
+
+void tessera_wt_init(tessera_wavetable_t *wt, const float *const *tables,
+                     int n_tables, int table_len, float base_hz, float sr)
+{
+    wt->tables    = tables;
+    wt->n_tables  = n_tables < 1 ? 1 : n_tables;
+    wt->table_len = table_len;
+    wt->base_hz   = base_hz > 0.0f ? base_hz : 1.0f;
+    wt->sr        = sr > 0.0f ? sr : 1.0f;
+    wt->phase     = 0.0f;
+    wt->inc       = 0.0f;
+    wt->sel       = 0;
+}
+
+void tessera_wt_set_freq(tessera_wavetable_t *wt, float freq)
+{
+    if (freq < 0.0f) freq = 0.0f;
+    wt->inc = freq / wt->sr;
+    /* Pick the highest-numbered (most band-limited) table whose octave the
+     * frequency has not yet exceeded: table i covers [base*2^i, base*2^(i+1)). */
+    int   idx = 0;
+    float f   = wt->base_hz;
+    while (idx < wt->n_tables - 1 && freq >= 2.0f * f) { f *= 2.0f; idx++; }
+    wt->sel = idx;
+}
+
+float tessera_wt_process(tessera_wavetable_t *wt)
+{
+    const float *t = wt->tables[wt->sel];
+    float pos  = wt->phase * (float)wt->table_len;
+    int   i0   = (int)pos;
+    float frac = pos - (float)i0;
+    if (i0 >= wt->table_len) i0 = 0;
+    int i1 = i0 + 1;
+    if (i1 >= wt->table_len) i1 = 0;
+    float y = t[i0] * (1.0f - frac) + t[i1] * frac;
+
+    wt->phase += wt->inc;
+    if (wt->phase >= 1.0f) wt->phase -= 1.0f;
+    return y;
+}
+
+void tessera_wt_bandlimit(float *table, int len, int n_harmonics)
+{
+    if (n_harmonics < 1) n_harmonics = 1;
+    float peak = 0.0f;
+    for (int i = 0; i < len; i++) {
+        float phase = (float)i / (float)len;
+        float s = 0.0f;
+        for (int k = 1; k <= n_harmonics; k++)
+            s += tessera_sinf((float)k * phase * TESSERA_TAU) / (float)k;
+        table[i] = s;
+        float a = s < 0.0f ? -s : s;
+        if (a > peak) peak = a;
+    }
+    /* Normalise to roughly [-1, 1]. */
+    if (peak > 0.0f) {
+        float g = 1.0f / peak;
+        for (int i = 0; i < len; i++) table[i] *= g;
+    }
+}
+
+/* ---- FM operators -------------------------------------------------------- */
+
+void tessera_fm_op_set(tessera_fm_op_t *op, float sr, float freq)
+{
+    if (sr <= 0.0f) sr = 1.0f;
+    op->inc = freq / sr;
+}
+
+float tessera_fm_op_process(tessera_fm_op_t *op, float phase_mod)
+{
+    float y = tessera_sinf((op->phase + phase_mod) * TESSERA_TAU);
+    op->phase += op->inc;
+    if (op->phase >= 1.0f) op->phase -= 1.0f;
+    if (op->phase < 0.0f)  op->phase += 1.0f;
+    return y;
+}
+
+float tessera_fm2(tessera_fm_op_t *carrier, tessera_fm_op_t *mod, float index)
+{
+    float m = tessera_fm_op_process(mod, 0.0f);
+    return tessera_fm_op_process(carrier, index * m);
+}
+
 /* ---- fractional delay line ---------------------------------------------- */
 
 void tessera_delay_init(tessera_delay_t *d, float *buf, uint32_t size)

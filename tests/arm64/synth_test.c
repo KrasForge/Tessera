@@ -22,6 +22,7 @@ static int g_fail;
     } while (0)
 
 #define SR 48000.0f
+#define PI_F 3.14159265358979323846
 
 /* Render `n` samples into `out`, returning peak absolute amplitude. */
 static float render(tessera_synth_t *s, float *out, int n)
@@ -149,6 +150,31 @@ static void test_voice_stealing(void)
     CHECK(render(&s, buf, 512) > 0.1f, "still producing audio after stealing");
 }
 
+static void test_fm_waveform(void)
+{
+    printf("- FM waveform: an FM voice sounds and adds upper harmonics (#164)\n");
+    tessera_voice_t voices[4];
+    tessera_synth_t s;
+    tessera_synth_init(&s, voices, 4, SR);
+    tessera_synth_set(&s, TESSERA_WAVE_FM, 1.0f, 10.0f, 1.0f, 200.0f);
+    tessera_synth_set_fm(&s, 1.0f, 1.5f);        /* ratio 1, index 1.5 */
+    tessera_synth_note_on(&s, 69, 127);          /* A4 = 440 Hz */
+
+    static float buf[8192];
+    render(&s, buf, 8192);
+    /* The FM voice produces audio and, at index 1.5, clear energy at 2*f0 that a
+     * pure sine would not have. */
+    float peak = 0;
+    for (int i = 0; i < 8192; i++) if (fabsf(buf[i]) > peak) peak = fabsf(buf[i]);
+    CHECK(peak > 0.1f, "FM voice produces audio");
+
+    /* Crude 2nd-harmonic probe via Goertzel at 880 Hz. */
+    double w = 2.0 * PI_F * 880.0 / SR, c = 2.0 * cos(w), s1 = 0, s2 = 0;
+    for (int i = 1024; i < 8192; i++) { double s0 = buf[i] + c * s1 - s2; s2 = s1; s1 = s0; }
+    double mag = sqrt((s1 - s2 * cos(w)) * (s1 - s2 * cos(w)) + (s2 * sin(w)) * (s2 * sin(w)));
+    CHECK(mag > 1.0, "FM adds a 2nd-harmonic component");
+}
+
 int main(void)
 {
     printf("=== Tessera SDK polyphonic-synth tests (Theme B, #113) ===\n");
@@ -158,6 +184,7 @@ int main(void)
     test_note_off_frees_voice();
     test_event_drive();
     test_voice_stealing();
+    test_fm_waveform();
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;
 }
