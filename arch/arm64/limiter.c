@@ -2,15 +2,9 @@
  * See limiter.h. */
 
 #include "limiter.h"
+#include "pcm_util.h"
 
 #define LIM_ONE 32768   /* Q15 unity gain */
-
-static int16_t sat16(int32_t v)
-{
-    if (v >  32767) return  32767;
-    if (v < -32768) return -32768;
-    return (int16_t)v;
-}
 
 static int32_t iabs(int32_t v) { return v < 0 ? -v : v; }
 

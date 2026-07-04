@@ -2,13 +2,7 @@
  * (Theme D, issue #118) */
 
 #include "mixer.h"
-
-static inline int16_t sat16(int32_t v)
-{
-    if (v > 32767) return 32767;
-    if (v < -32768) return -32768;
-    return (int16_t)v;
-}
+#include "pcm_util.h"
 
 void mix_gain(int16_t *dst, const int16_t *src, int32_t gain_q15, uint32_t n)
 {

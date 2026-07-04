@@ -1,15 +1,9 @@
 /* arch/arm64/src.c - sample-rate conversion (Theme H, issue #131).  See src.h. */
 
 #include "src.h"
+#include "pcm_util.h"
 
 #define SRC_ONE  (1ull << 32)   /* Q32 unity */
-
-static int16_t sat16(int32_t v)
-{
-    if (v >  32767) return  32767;
-    if (v < -32768) return -32768;
-    return (int16_t)v;
-}
 
 void src_init(src_t *s, uint32_t in_rate, uint32_t out_rate)
 {

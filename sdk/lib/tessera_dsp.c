@@ -27,21 +27,8 @@ static float sqrtf_(float x)
     return y;
 }
 
-/* 2^x for x in any range: split integer and fractional parts, 2^frac by a
- * 3rd-order minimax-ish polynomial (< 0.1% error) scaled via the exponent. */
-static float exp2f_(float x)
-{
-    if (x < -126.0f) return 0.0f;
-    if (x >  126.0f) x = 126.0f;
-    float xi = (float)(int)x;
-    if (x < 0.0f && x != xi) xi -= 1.0f;          /* floor */
-    float f = x - xi;                             /* [0,1) */
-    float p = 1.0f + f * (0.6931472f + f * (0.2402265f + f * 0.0555041f));
-    union { float f; uint32_t u; } v;
-    v.u = (uint32_t)((int)xi + 127) << 23;        /* 2^xi   */
-    return p * v.f;
-}
-static float pow10_(float x) { return exp2f_(x * 3.32192809f); }  /* 10^x */
+/* 2^x and 10^x via the shared libm-free helper in tessera_math.c. */
+static float pow10_(float x) { return tessera_exp2f(x * 3.32192809f); }  /* 10^x */
 
 /* ---- one-pole parameter smoother ---------------------------------------- */
 
