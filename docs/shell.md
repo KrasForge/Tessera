@@ -84,3 +84,20 @@ On the target the shell runs off the audio core (CPU0 is untouchable) and
 shares the one UART with the periodic `audio_latency:` reporter. The platform
 serialises whole messages with a lock, so shell responses and reporter lines
 never tear on the wire (issue #80).
+
+## `prof` - per-plugin profiler (issue #129)
+
+`prof` reports where the CPU goes, aggregating the M12 per-plugin service-time
+snapshot (`arch/arm64/plugin_time.c`) into per-plugin load and graph headroom
+(`arch/arm64/profiler.c`):
+
+```
+prof: pid=3 runs=2400 mean=334us max=352us load=33.4% overruns=2
+prof: pid=7 runs=2400 mean=120us max=131us load=12.0% overruns=0
+prof: total load=45.4% headroom=54.6%
+```
+
+`load` is the mean service time as a fraction of the block period (per-mille
+internally, shown as a percentage); `headroom` is `100% - total load`. The same
+numbers feed the on-device meter (Theme E OLED UI, #121). The aggregation is
+pure integer and off the audio path; covered by `make test-arm-profiler`.
