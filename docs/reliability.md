@@ -347,3 +347,29 @@ node is bypassed and emits its dry input (identified and contained), and the
 DAC-bound block is never all-zero. A 20 000-round soak injects hundreds of faults
 and reloads with **zero dropouts**. Because it is deterministic it runs as a CI
 gate, not a one-off demo. Covered by `make test-arm-chaos`.
+
+## Secure and measured boot (Theme M21, issue #193)
+
+Signed plugin packages (issue #125) authenticate a plugin before it is mapped;
+secure boot extends the same trust down to the boot chain so the *kernel image
+itself* is authenticated before it runs (`arch/arm64/secureboot.c`). A boot image
+is a fixed header (magic, versions, load address, payload length, and the
+payload's SHA-256) followed by the kernel payload and a trailing HMAC-SHA256 over
+header+payload under a provisioning boot key.
+
+- **Verified boot** - `secureboot_verify` recomputes the payload hash and checks
+  it against the header (integrity), then authenticates header+payload with the
+  key in constant time (authenticity). A swapped or corrupted image is rejected
+  before the jump to the kernel: a flipped payload byte fails the hash, a flipped
+  header byte or the wrong key fails the MAC. The header is untrusted, so every
+  length is bounds-checked (a too-short blob, a bad magic, or an over-long payload
+  length are rejected before any payload byte is read).
+- **Measured boot** - a PCR-style measurement register folds each boot stage into
+  a running hash chain, `m = SHA-256(m || SHA-256(stage))`. The chain is
+  deterministic and order-sensitive, so the final value attests exactly what
+  booted - even a stage loaded without verification is still measured, and any
+  change to a stage or its order changes the measurement.
+
+Reuses `arch/arm64/sha256.c`; integer-only and libc-free, so it links into the
+first-stage / kernel. The on-board first-stage loader that runs this is hardware;
+the verify and measure logic is validated by `make test-arm-secureboot`.

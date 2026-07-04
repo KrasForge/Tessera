@@ -1012,6 +1012,14 @@ test-arm-package: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_PKG_TEST_SRCS) -o $(ARM_BUILD_DIR)/package_test
 	$(ARM_BUILD_DIR)/package_test
 
+# Host unit tests for secure + measured boot (Theme M21, #193): boot-image verify
+# (hash + HMAC), tamper/malformed rejection, and the measured-boot extend chain.
+ARM_SECUREBOOT_TEST_SRCS = tests/arm64/secureboot_test.c $(ARCH_ARM_DIR)/secureboot.c $(ARCH_ARM_DIR)/sha256.c
+test-arm-secureboot: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_SECUREBOOT_TEST_SRCS) -o $(ARM_BUILD_DIR)/secureboot_test
+	$(ARM_BUILD_DIR)/secureboot_test
+
 # Rust plugin SDK (Theme F, #126): the safe wrapper over the C ABI drives a gain
 # plugin through the generated exports.  Requires a host Rust toolchain (cargo).
 test-rust-sdk:
