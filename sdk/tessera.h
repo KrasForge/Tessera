@@ -108,6 +108,65 @@ typedef struct {
  */
 int tessera_param_queue_read(tessera_param_queue_t *q, uint32_t *id, float *value);
 
+/* ---- note events and transport (Plugin ABI v1.1, issue #124) -------------- *
+ * A v1.1 host delivers MIDI/note events and a musical-time snapshot to a plugin
+ * through a second lock-free SPSC queue mapped read/write at a fixed VA, exactly
+ * like the parameter queue.  A v1.0 plugin never reads it, so v1.1 is a
+ * backward-compatible (minor) ABI bump: a v1.0 plugin still loads on a v1.1
+ * host, and a v1.1 plugin is refused by a host too old to understand it (see
+ * tessera_abi_compatible in plugin_abi.h).  This layout is part of the host
+ * contract (docs/plugin-abi.md); it is NOT a kernel header. */
+#define TESSERA_EVENT_QUEUE_VA    (0x8000000000ull + 0x0F000000ull)
+#define TESSERA_EVENT_QUEUE_MAGIC 0x51565145u   /* 'EQVQ' */
+
+/* Event kinds (MIDI-shaped). */
+#define TESSERA_EV_NOTE_ON  1u
+#define TESSERA_EV_NOTE_OFF 2u
+#define TESSERA_EV_CC       3u
+
+typedef struct {
+    uint8_t type;      /* TESSERA_EV_*                      */
+    uint8_t channel;   /* 0..15                             */
+    uint8_t data1;     /* note number / CC number           */
+    uint8_t data2;     /* velocity / CC value               */
+} tessera_note_event_t;
+
+/* Transport snapshot for the current block. */
+#define TESSERA_TRANSPORT_PLAYING 1u
+typedef struct {
+    uint32_t flags;      /* TESSERA_TRANSPORT_*                    */
+    uint32_t tempo_mbpm; /* tempo in milli-BPM (120000 == 120 BPM)*/
+    uint32_t bar;        /* current bar  (0-based)                */
+    uint32_t beat;       /* current beat (0-based)                */
+    uint32_t tick;       /* ticks into the current beat           */
+    uint32_t ppq;        /* ticks per quarter note                */
+} tessera_transport_t;
+
+typedef struct {
+    uint32_t magic;      /* TESSERA_EVENT_QUEUE_MAGIC             */
+    uint32_t capacity;   /* events (power of two)                 */
+    uint32_t mask;
+    uint32_t _pad;
+    uint32_t head;       /* producer (host) index, release        */
+    uint32_t tail;       /* consumer (plugin) index, release      */
+    tessera_transport_t transport;   /* refreshed by the host each block */
+    /* tessera_note_event_t events[capacity] follow immediately. */
+} tessera_event_queue_t;
+
+#define TESSERA_EVENT_QUEUE \
+    ((tessera_event_queue_t *)(uintptr_t)TESSERA_EVENT_QUEUE_VA)
+
+/* Drain one note/CC event from the queue.  Returns 1 and writes *ev if one was
+ * available, 0 if empty.  Wait-free, real-time safe.  Typical use:
+ *
+ *     tessera_note_event_t ev;
+ *     while (tessera_event_read(TESSERA_EVENT_QUEUE, &ev)) handle(&ev);
+ */
+int  tessera_event_read(tessera_event_queue_t *q, tessera_note_event_t *ev);
+
+/* Copy the current-block transport snapshot into *out (zeroed if unavailable). */
+void tessera_transport_read(const tessera_event_queue_t *q, tessera_transport_t *out);
+
 /* ---- DSP building blocks (libtessera.a) ---------------------------------- *
  * Real-time-safe primitives so authors do not start from sinf and a bare
  * buffer: one-pole smoothers, RBJ biquads, oscillators (polyBLEP anti-aliased),

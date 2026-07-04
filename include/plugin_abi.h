@@ -56,9 +56,22 @@ extern "C" {
  * accepts a plugin only when its major matches and its minor is <= the host's
  * minor, so additive (minor) changes stay backward compatible. */
 #define TESSERA_PLUGIN_ABI_VERSION_MAJOR 1u
-#define TESSERA_PLUGIN_ABI_VERSION_MINOR 0u
+#define TESSERA_PLUGIN_ABI_VERSION_MINOR 1u   /* v1.1: note/transport events (issue #124) */
 #define TESSERA_PLUGIN_ABI_VERSION \
     ((TESSERA_PLUGIN_ABI_VERSION_MAJOR << 16) | TESSERA_PLUGIN_ABI_VERSION_MINOR)
+
+/* Compatibility test the host applies to a plugin's reported version: the major
+ * must match exactly and the minor must be <= the host's, so a plugin built
+ * against an older minor still loads (v1.0 on a v1.1 host) while one built
+ * against a newer minor than the host understands is refused.  Pure and
+ * header-only, so both the kernel loader and host tests use the same rule. */
+static inline int tessera_abi_compatible(uint32_t plugin_version)
+{
+    uint32_t major = plugin_version >> 16;
+    uint32_t minor = plugin_version & 0xffffu;
+    return major == TESSERA_PLUGIN_ABI_VERSION_MAJOR &&
+           minor <= TESSERA_PLUGIN_ABI_VERSION_MINOR;
+}
 
 /* Freeze guard: the v1 line is MAJOR 1.  A change here is an intentional,
  * reviewed ABI break, not an accident. */
