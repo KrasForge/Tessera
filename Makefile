@@ -967,6 +967,14 @@ test-arm-denorm: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_DENORM_TEST_SRCS) -o $(ARM_BUILD_DIR)/denorm_test
 	$(ARM_BUILD_DIR)/denorm_test
 
+# Host unit tests for the sample-rate converter (Theme H, #131): DC preservation,
+# exact 2x up/downsample, rate-ratio output counts, and block-streaming seams.
+ARM_SRC_TEST_SRCS = tests/arm64/src_test.c $(ARCH_ARM_DIR)/src.c
+test-arm-src: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_SRC_TEST_SRCS) -o $(ARM_BUILD_DIR)/src_test
+	$(ARM_BUILD_DIR)/src_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.
