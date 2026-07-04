@@ -225,6 +225,97 @@ void  tessera_adsr_init(tessera_adsr_t *e, float sr, float a_ms, float d_ms,
 void  tessera_adsr_gate(tessera_adsr_t *e, int on);   /* on = note-on, off = note-off */
 float tessera_adsr     (tessera_adsr_t *e);
 
+/* ---- reference effects suite (libtessera.a, Theme B, issue #111) --------- *
+ * Complete effects composed from the primitives above, so a plugin author can
+ * drop in an overdrive, compressor, EQ, delay, chorus, reverb, gate, or tuner
+ * without wiring the DSP by hand.  Every block is real-time safe: no libc, no
+ * allocation, no unbounded per-sample work.  Delay-based effects take a
+ * caller-supplied backing buffer - the SDK never allocates. */
+
+/* Overdrive / distortion: a stateless soft-clipping waveshaper.  `drive` (>= 1)
+ * scales the input into the nonlinearity; `level` scales the result.  A rational
+ * tanh approximation keeps it smooth and bounded to (-level, +level). */
+float tessera_fx_overdrive(float x, float drive, float level);
+
+/* Feed-forward compressor: a peak detector drives a static gain computer
+ * (threshold, ratio, makeup).  attack/release are the detector time constants. */
+typedef struct {
+    tessera_envfollow_t det;
+    float thresh_lin, inv_ratio_minus_1, makeup_lin;
+} tessera_fx_comp_t;
+void  tessera_fx_comp_init(tessera_fx_comp_t *c, float sr, float atk_ms,
+                           float rel_ms, float thresh_db, float ratio,
+                           float makeup_db);
+float tessera_fx_comp(tessera_fx_comp_t *c, float x);
+
+/* 3-band EQ: a low shelf, a peaking mid, and a high shelf in series. */
+typedef struct { tessera_biquad_t low, mid, high; } tessera_fx_eq3_t;
+void  tessera_fx_eq3_init(tessera_fx_eq3_t *eq, float sr,
+                          float low_f,  float low_db,
+                          float mid_f,  float mid_q, float mid_db,
+                          float high_f, float high_db);
+float tessera_fx_eq3(tessera_fx_eq3_t *eq, float x);
+
+/* Delay with feedback and a wet/dry mix.  Set the delay in samples (a host can
+ * derive it from tempo with tessera-transport / tempo_sync).  `feedback` in
+ * [0,1); `mix` in [0,1] (0 = dry, 1 = wet). */
+typedef struct {
+    tessera_delay_t line;
+    float delay_samples, feedback, mix;
+} tessera_fx_delay_t;
+void  tessera_fx_delay_init(tessera_fx_delay_t *d, float *buf, uint32_t size);
+void  tessera_fx_delay_set (tessera_fx_delay_t *d, float delay_samples,
+                            float feedback, float mix);
+float tessera_fx_delay(tessera_fx_delay_t *d, float x);
+
+/* Chorus: a short LFO-modulated delay mixed with the dry signal. */
+typedef struct {
+    tessera_delay_t line;
+    tessera_osc_t   lfo;
+    float base_samples, depth_samples, mix;
+} tessera_fx_chorus_t;
+void  tessera_fx_chorus_init(tessera_fx_chorus_t *c, float *buf, uint32_t size,
+                             float sr, float rate_hz, float base_ms,
+                             float depth_ms, float mix);
+float tessera_fx_chorus(tessera_fx_chorus_t *c, float x);
+
+/* Noise gate: below the threshold the signal is smoothly muted; above it, it
+ * passes.  attack/release come from the internal smoother and detector. */
+typedef struct {
+    tessera_envfollow_t det;
+    tessera_smooth_t    gain;
+    float thresh_lin;
+} tessera_fx_gate_t;
+void  tessera_fx_gate_init(tessera_fx_gate_t *g, float sr, float thresh_db,
+                           float atk_ms, float rel_ms);
+float tessera_fx_gate(tessera_fx_gate_t *g, float x);
+
+/* Schroeder reverb: 4 parallel damped feedback combs into 2 series allpasses.
+ * The caller supplies 4 comb buffers and 2 allpass buffers; each line's delay is
+ * its buffer length, so buffer sizes set the room character.  `feedback` in
+ * [0,1) sets the tail length, `damp` in [0,1] the high-frequency decay. */
+typedef struct {
+    tessera_delay_t comb[4];
+    float           comb_lp[4];
+    tessera_delay_t ap[2];
+    float feedback, damp, mix;
+} tessera_fx_reverb_t;
+void  tessera_fx_reverb_init(tessera_fx_reverb_t *r,
+                             float *comb_buf[4], uint32_t comb_size[4],
+                             float *ap_buf[2],   uint32_t ap_size[2],
+                             float feedback, float damp, float mix);
+float tessera_fx_reverb(tessera_fx_reverb_t *r, float x);
+
+/* Tuner: estimate the fundamental of a block by interpolated upward
+ * zero-crossings.  Call _process with each block, then _hz for the current
+ * estimate (0 if too few crossings).  tessera_fx_note_of maps a frequency to
+ * the nearest MIDI note, writing the cents offset (-50..+50) if `cents` != NULL. */
+typedef struct { float sr, hz; } tessera_fx_tuner_t;
+void  tessera_fx_tuner_init   (tessera_fx_tuner_t *t, float sr);
+void  tessera_fx_tuner_process(tessera_fx_tuner_t *t, const float *x, uint32_t n);
+float tessera_fx_tuner_hz     (const tessera_fx_tuner_t *t);
+int   tessera_fx_note_of      (float hz, float *cents);
+
 #ifdef __cplusplus
 }
 #endif
