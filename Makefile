@@ -975,6 +975,14 @@ test-arm-src: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_SRC_TEST_SRCS) -o $(ARM_BUILD_DIR)/src_test
 	$(ARM_BUILD_DIR)/src_test
 
+# Host unit tests for multi-channel audio I/O (Theme H, #132): interleave /
+# de-interleave and the device<->graph channel routing matrix.
+ARM_MULTIIO_TEST_SRCS = tests/arm64/multiio_test.c $(ARCH_ARM_DIR)/multiio.c
+test-arm-multiio: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_MULTIIO_TEST_SRCS) -o $(ARM_BUILD_DIR)/multiio_test
+	$(ARM_BUILD_DIR)/multiio_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.

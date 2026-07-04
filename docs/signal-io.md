@@ -50,3 +50,28 @@ split input produces bit-identical output to the unsplit call. `src_out_capacity
 reports a safe output-buffer size for a given input length.
 
 Covered by `make test-arm-src`.
+
+## Multi-channel I/O (issue #132)
+
+The graph carries multi-channel buses (issue #119); `arch/arm64/multiio.c` is the
+device side - an interface with more than two channels (a multi-out DAC, a
+four-in ADC) and the routing between the device's physical channels and the
+graph's input/output bus channels.
+
+Hardware moves frames **interleaved** (`L R L R ...`) while the graph and the DSP
+work on **planar** per-channel buffers, so this module de-interleaves on capture
+and interleaves on playback. Between the two it applies a **routing matrix**:
+
+- `out_src[d]` - the graph channel feeding device output channel `d` (or
+  `IO_SILENCE`). One graph channel can feed several device outputs (mono to a
+  stereo pair), a pair can be swapped, or a channel left unpatched.
+- `in_src[g]` - the device input channel feeding graph input channel `g` (or
+  `IO_SILENCE`).
+
+`io_config_init` starts from identity routing (graph channel *i* ↔ device channel
+*i* where both exist, silence otherwise); `io_route_out` / `io_route_in` override
+individual channels with bounds checks. A route to a missing or silenced source
+outputs zeros rather than reading out of range. int16 PCM, integer only - it runs
+on the audio path.
+
+Covered by `make test-arm-multiio`.
