@@ -861,6 +861,13 @@ test-arm-profiler: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_PROF_TEST_SRCS) -o $(ARM_BUILD_DIR)/profiler_test
 	$(ARM_BUILD_DIR)/profiler_test
 
+# Host unit tests for the mixer / gain-pan / wet-dry routing primitives (Theme D, #118).
+ARM_MIX_TEST_SRCS = tests/arm64/mixer_test.c $(ARCH_ARM_DIR)/mixer.c
+test-arm-mixer: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_MIX_TEST_SRCS) -o $(ARM_BUILD_DIR)/mixer_test
+	$(ARM_BUILD_DIR)/mixer_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.
