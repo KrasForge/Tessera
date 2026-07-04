@@ -160,3 +160,19 @@ int16 PCM blocks, so the mixer, send/return, and gain/pan graph nodes run on the
   hardware relay for analog bypass).
 
 Covered by `make test-arm-mixer`.
+
+## Multi-channel buses (issue #119)
+
+Edges are stereo by default, but a node can declare its own input and output
+widths so a graph can carry mono sends, stereo, or wider surround/ambisonic
+buses. Each node has an `in_ch`/`out_ch` count (both default to 2), settable
+with `audio_graph_set_channels(g, node, in_ch, out_ch)` (a count of `0` leaves
+that side unchanged). A connect requires the producer's `out_ch` to equal the
+consumer's `in_ch`; a mismatch is rejected and leaves the edge table untouched,
+so a stereo plugin can only wire to a stereo input and a 6-channel source only
+to a 6-channel consumer. The accepted edge records the width it carries, read
+back with `audio_graph_edge_channels(g, e)`, which the kernel uses to size the
+ring buffer that backs the edge. Because the defaults are 2/2, every existing
+stereo graph connects exactly as before.
+
+Covered by `make test-arm-graph`.

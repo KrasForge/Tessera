@@ -207,6 +207,46 @@ static void test_feedback_edges(void)
           "graph still sorts after the feedback edge is removed");
 }
 
+static void test_channels(void)
+{
+    printf("- multi-channel buses: connect requires matching widths (#119)\n");
+    audio_graph_t g;
+    audio_graph_init(&g, valid_pid);
+
+    /* Nodes default to stereo, so a plain stereo graph is unaffected. */
+    int s = audio_graph_add_node(&g, 1);
+    int e = audio_graph_add_node(&g, 2);
+    int dac = audio_graph_add_dac(&g);
+    int se = audio_graph_connect(&g, s, e);
+    CHECK(se >= 0, "stereo default: synth -> effect connects");
+    CHECK(audio_graph_edge_channels(&g, se) == 2, "stereo edge carries 2 channels");
+    CHECK(audio_graph_connect(&g, e, dac) >= 0, "stereo effect -> DAC connects");
+
+    /* A mismatched pair is rejected and leaves the edge table untouched. */
+    audio_graph_t g2;
+    audio_graph_init(&g2, valid_pid);
+    int a = audio_graph_add_node(&g2, 1);   /* 6-out surround source */
+    int b = audio_graph_add_node(&g2, 2);   /* stereo consumer       */
+    audio_graph_set_channels(&g2, a, 2, 6);
+    int before = g2.n_edges;
+    CHECK(audio_graph_connect(&g2, a, b) == -1, "6ch -> 2ch mismatch rejected");
+    CHECK(g2.n_edges == before, "rejected connect adds no edge");
+
+    /* Widen the consumer's input to 6 and the same edge now connects. */
+    audio_graph_set_channels(&g2, b, 6, 2);
+    int ab = audio_graph_connect(&g2, a, b);
+    CHECK(ab >= 0, "6ch -> 6ch matching connects");
+    CHECK(audio_graph_edge_channels(&g2, ab) == 6, "surround edge carries 6 channels");
+
+    /* A 0 count leaves that side unchanged (set only out_ch here). */
+    int c = audio_graph_add_node(&g2, 3);
+    audio_graph_set_channels(&g2, c, 0, 4);
+    CHECK(g2.nodes[c].in_ch == 2 && g2.nodes[c].out_ch == 4,
+          "zero count leaves in_ch, sets out_ch");
+
+    CHECK(audio_graph_edge_channels(&g2, 99) == 0, "out-of-range edge -> 0 channels");
+}
+
 int main(void)
 {
     printf("=== Tessera audio-graph tests (issue #27) ===\n");
@@ -218,6 +258,7 @@ int main(void)
     test_full();
     test_input_node();
     test_feedback_edges();
+    test_channels();
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;
 }

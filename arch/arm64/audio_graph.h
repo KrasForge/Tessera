@@ -35,14 +35,17 @@ typedef enum {
 typedef struct {
     node_type_t type;
     uint32_t    pid;       /* plugin PID (0 = DAC, GRAPH_INPUT_PID = input) */
+    uint16_t    in_ch;     /* input channel count  (default 2 = stereo)    */
+    uint16_t    out_ch;    /* output channel count (default 2 = stereo)    */
 } graph_node_t;
 
 typedef struct {
-    int   used;
-    int   src;             /* producing node index            */
-    int   dst;             /* consuming node index            */
-    int   feedback;        /* 1 = one-block-delayed edge (breaks a cycle) */
-    void *ring;            /* shared ring backing this edge (kernel-set) */
+    int      used;
+    int      src;          /* producing node index            */
+    int      dst;          /* consuming node index            */
+    int      feedback;     /* 1 = one-block-delayed edge (breaks a cycle) */
+    uint16_t channels;     /* channels the edge carries (src's out_ch)    */
+    void    *ring;         /* shared ring backing this edge (kernel-set)  */
 } graph_edge_t;
 
 typedef struct {
@@ -61,8 +64,19 @@ typedef struct {
 void audio_graph_init(audio_graph_t *g, int (*validator)(uint32_t pid));
 
 /* Add a plugin node for `pid`.  Returns the node index, or -1 if the PID is
- * invalid or the graph is full.  On error the graph is left unchanged. */
+ * invalid or the graph is full.  On error the graph is left unchanged.  The node
+ * defaults to stereo (2 in, 2 out); set other counts with
+ * audio_graph_set_channels. */
 int audio_graph_add_node(audio_graph_t *g, uint32_t pid);
+
+/* Declare a node's input/output channel counts (default 2/2).  A connect
+ * requires the producer's out_ch to equal the consumer's in_ch, so stereo
+ * plugins stay compatible and a multi-channel plugin only wires to a matching
+ * one.  Counts of 0 leave that side unchanged. */
+void audio_graph_set_channels(audio_graph_t *g, int node, uint16_t in_ch, uint16_t out_ch);
+
+/* The channel count an edge carries, or 0 if the edge is unused. */
+uint16_t audio_graph_edge_channels(const audio_graph_t *g, int e);
 
 /* Add the single DAC sink node.  Returns its index, or -1 if one already
  * exists or the graph is full. */
