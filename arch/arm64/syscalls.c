@@ -35,6 +35,16 @@ __attribute__((weak)) void sched_kill(struct trapframe *tf) { (void)tf; }
  * no-op. */
 __attribute__((weak)) void syscall_trace(uint64_t num) { (void)num; }
 
+/* Per-plugin syscall/I/O-rate quota gate (Theme M22, issue #198).  Charges the
+ * running plugin's window quota for this syscall; returns 1 to service it, 0
+ * to refuse it (the plugin is over its per-window syscall ceiling - throttled
+ * without being serviced).  The weak default charges nothing, so ungoverned
+ * harnesses and the trusted kernel path are unaffected; the audio engine's
+ * glue installs a strong version bound to current_process()'s io_quota_t, and
+ * a sustained abuser is escalated to a kill through ioq_window() (io_quota.c),
+ * exactly like an over-CPU-budget plugin. */
+__attribute__((weak)) int syscall_quota_charge(uint64_t num) { (void)num; return 1; }
+
 /* Audio-graph control plane (issue #28).  Weak defaults so harnesses without
  * the control plane still link; graph_control glue provides the strong ones. */
 __attribute__((weak)) long sys_graph_connect(uint32_t s, uint32_t d)    { (void)s; (void)d; return -1; }
@@ -71,6 +81,18 @@ void arm64_handle_svc(struct trapframe *tf)
                 kernel_resume(-1);
             return;                 /* unreachable */
         }
+    }
+
+    /* Per-plugin syscall-rate throttle (issue #198): charge the running
+     * plugin's window quota and refuse this call if it is over its ceiling -
+     * an over-rate plugin is throttled (the syscall is not serviced) without
+     * killing it outright; sustained abuse escalates to a kill at the window
+     * boundary (ioq_window).  EXIT and YIELD are always honoured so a
+     * throttled plugin can still relinquish the core; every other syscall is
+     * subject to the ceiling. */
+    if (num != SYS_EXIT && num != SYS_YIELD && !syscall_quota_charge(num)) {
+        tf->x[0] = (uint64_t)-1;         /* refused: over the syscall ceiling */
+        return;
     }
 
     switch (num) {
