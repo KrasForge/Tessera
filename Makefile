@@ -922,6 +922,14 @@ test-arm-bank: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_BANK_TEST_SRCS) -o $(ARM_BUILD_DIR)/bank_test
 	$(ARM_BUILD_DIR)/bank_test
 
+# Host unit tests for the OSC codec + remote-editor dispatch (Theme E, #123):
+# byte layout, encode/parse round-trip, malformed-input rejection, dispatch.
+ARM_OSC_TEST_SRCS = tests/arm64/osc_test.c $(ARCH_ARM_DIR)/osc.c
+test-arm-osc: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_OSC_TEST_SRCS) -o $(ARM_BUILD_DIR)/osc_test
+	$(ARM_BUILD_DIR)/osc_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.
