@@ -584,6 +584,9 @@ jobs:
       - name: SDK library host unit tests (sinf/clampf/param-queue, ASan + UBSan)
         run: make test-sdk
 
+      - name: SDK DSP building-block host unit tests (biquad/osc/delay/env/adsr, ASan + UBSan)
+        run: make test-arm-dsp
+
       - name: Build the example plugin using ONLY the SDK
         run: make -C sdk/examples/sine_plugin CROSS_COMPILE=aarch64-linux-gnu-
 

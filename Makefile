@@ -820,6 +820,16 @@ test-sdk: verify-sdk-abi-sync | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_SDK_TEST_SRCS) -o $(ARM_BUILD_DIR)/sdk_test -lm
 	$(ARM_BUILD_DIR)/sdk_test
 
+# Host unit tests for the SDK DSP building blocks (Theme B): biquads,
+# oscillators, delay line, envelope follower, ADSR, and the one-pole smoother.
+# The reference libm (-lm) is used only to generate test tones and check errors;
+# the SDK DSP code itself uses none.
+ARM_DSP_TEST_SRCS = tests/arm64/dsp_test.c sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c
+test-arm-dsp: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk $(ARM_DSP_TEST_SRCS) -o $(ARM_BUILD_DIR)/dsp_test -lm
+	$(ARM_BUILD_DIR)/dsp_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.

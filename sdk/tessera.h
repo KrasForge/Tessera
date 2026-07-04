@@ -108,6 +108,64 @@ typedef struct {
  */
 int tessera_param_queue_read(tessera_param_queue_t *q, uint32_t *id, float *value);
 
+/* ---- DSP building blocks (libtessera.a) ---------------------------------- *
+ * Real-time-safe primitives so authors do not start from sinf and a bare
+ * buffer: one-pole smoothers, RBJ biquads, oscillators (polyBLEP anti-aliased),
+ * a fractional delay line, an envelope follower, and an ADSR.  No libc, no
+ * allocation, no unbounded per-sample work. */
+
+/* One-pole parameter smoother (click-free control changes). */
+typedef struct { float y, a; } tessera_smooth_t;
+void  tessera_smooth_init(tessera_smooth_t *s, float sr, float time_ms);
+void  tessera_smooth_set(tessera_smooth_t *s, float value);   /* jump, no glide */
+float tessera_smooth(tessera_smooth_t *s, float target);       /* one step toward target */
+
+/* RBJ-cookbook biquad, transposed direct form II.  Design once, then process
+ * per sample.  `q` is the quality factor; `gain_db` the shelf/peak gain. */
+typedef struct { float b0, b1, b2, a1, a2; float z1, z2; } tessera_biquad_t;
+void  tessera_biquad_lowpass  (tessera_biquad_t *bq, float sr, float f, float q);
+void  tessera_biquad_highpass (tessera_biquad_t *bq, float sr, float f, float q);
+void  tessera_biquad_bandpass (tessera_biquad_t *bq, float sr, float f, float q);
+void  tessera_biquad_notch    (tessera_biquad_t *bq, float sr, float f, float q);
+void  tessera_biquad_peaking  (tessera_biquad_t *bq, float sr, float f, float q, float gain_db);
+void  tessera_biquad_lowshelf (tessera_biquad_t *bq, float sr, float f, float q, float gain_db);
+void  tessera_biquad_highshelf(tessera_biquad_t *bq, float sr, float f, float q, float gain_db);
+void  tessera_biquad_reset    (tessera_biquad_t *bq);
+float tessera_biquad_process  (tessera_biquad_t *bq, float x);
+
+/* Oscillator.  Set frequency, then call one waveform per sample; saw/square use
+ * polyBLEP to suppress the worst aliasing. */
+typedef struct { float phase, inc; } tessera_osc_t;
+void  tessera_osc_set     (tessera_osc_t *o, float sr, float freq);
+float tessera_osc_sin     (tessera_osc_t *o);
+float tessera_osc_saw     (tessera_osc_t *o);
+float tessera_osc_square  (tessera_osc_t *o);
+float tessera_osc_triangle(tessera_osc_t *o);
+
+/* Fractional (linearly-interpolated) delay line.  The caller supplies the
+ * backing buffer (`size` floats) - the SDK never allocates. */
+typedef struct { float *buf; uint32_t size, w; } tessera_delay_t;
+void  tessera_delay_init (tessera_delay_t *d, float *buf, uint32_t size);
+void  tessera_delay_write(tessera_delay_t *d, float x);
+float tessera_delay_read (const tessera_delay_t *d, float delay_samples);
+float tessera_delay_tick (tessera_delay_t *d, float x, float delay_samples);
+
+/* Peak envelope follower with attack/release time constants (ms). */
+typedef struct { float env, atk, rel; } tessera_envfollow_t;
+void  tessera_envfollow_init(tessera_envfollow_t *e, float sr, float atk_ms, float rel_ms);
+float tessera_envfollow     (tessera_envfollow_t *e, float x);
+
+/* ADSR envelope generator. */
+typedef enum {
+    TESSERA_ADSR_IDLE = 0, TESSERA_ADSR_ATTACK, TESSERA_ADSR_DECAY,
+    TESSERA_ADSR_SUSTAIN, TESSERA_ADSR_RELEASE
+} tessera_adsr_stage_t;
+typedef struct { float a_rate, d_rate, r_rate, sustain, level; int stage; } tessera_adsr_t;
+void  tessera_adsr_init(tessera_adsr_t *e, float sr, float a_ms, float d_ms,
+                        float sustain, float r_ms);
+void  tessera_adsr_gate(tessera_adsr_t *e, int on);   /* on = note-on, off = note-off */
+float tessera_adsr     (tessera_adsr_t *e);
+
 #ifdef __cplusplus
 }
 #endif
