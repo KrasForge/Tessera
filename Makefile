@@ -922,6 +922,14 @@ test-arm-mixer: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_MIX_TEST_SRCS) -o $(ARM_BUILD_DIR)/mixer_test
 	$(ARM_BUILD_DIR)/mixer_test
 
+# Host unit tests for the master limiter / soft-clip (Theme M15, #166): brick-wall
+# ceiling on square/sine, transparent-below, and soft-clip shape.
+ARM_LIMITER_TEST_SRCS = tests/arm64/limiter_test.c $(ARCH_ARM_DIR)/limiter.c
+test-arm-limiter: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_LIMITER_TEST_SRCS) -o $(ARM_BUILD_DIR)/limiter_test -lm
+	$(ARM_BUILD_DIR)/limiter_test
+
 # Host unit tests for the control-surface mapping with MIDI-learn (Theme E, #120):
 # footswitch/encoder/expression/MIDI-CC bindings, value scaling, and learn mode.
 ARM_CTLMAP_TEST_SRCS = tests/arm64/ctlmap_test.c $(ARCH_ARM_DIR)/ctlmap.c

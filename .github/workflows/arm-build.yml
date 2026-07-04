@@ -421,6 +421,9 @@ jobs:
       - name: Mixer / routing host unit tests (gain/pan/wet-dry/bypass, ASan + UBSan)
         run: make test-arm-mixer
 
+      - name: Master limiter / soft-clip host unit tests (brick-wall + soft-clip, ASan + UBSan)
+        run: make test-arm-limiter
+
       - name: Multi-plugin graph processes in topological order on QEMU virt
         run: make test-arm-graph-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
