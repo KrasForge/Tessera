@@ -1,9 +1,13 @@
-# Tessera Plugin ABI v1.0
+# Tessera Plugin ABI v1.1
 
-**Status: stable (frozen).** This document is the complete, self-contained
-specification for building an audio plugin that the Tessera host can load and
-run. It freezes the interface introduced in issue #23; nothing in this document
-changes without a **major** version bump (see [Versioning](#versioning)).
+**Status: stable.** This document is the complete, self-contained specification
+for building an audio plugin that the Tessera host can load and run. The v1
+interface introduced in issue #23 is **frozen at the major version**: the five
+required exports and their signatures never change without a major bump.
+Backward-compatible additions bump only the **minor** version - v1.1 adds an
+optional note-event and transport surface (issue #124) that older (v1.0) plugins
+simply ignore. See [Versioning](#7-versioning) and
+[§11](#11-v11-note-events-and-transport).
 
 The normative source of the constants and symbol names is
 [`include/plugin_abi.h`](../include/plugin_abi.h). A third party needs only that
@@ -20,6 +24,7 @@ plugin with a stock `aarch64` toolchain; no Tessera kernel sources are required.
 - [8. Loading and validation](#8-loading-and-validation)
 - [9. A complete plugin, from scratch](#9-a-complete-plugin-from-scratch)
 - [10. Conformance checklist](#10-conformance-checklist)
+- [11. v1.1: note events and transport](#11-v11-note-events-and-transport)
 
 ---
 
@@ -360,3 +365,40 @@ A conforming v1.0 plugin:
 
 The reference plugins in `plugins/` are verified against this checklist by
 `make verify-plugin-abi` (run in CI).
+
+---
+
+## 11. v1.1: note events and transport
+
+**Added in ABI v1.1 (issue #124). Optional and backward compatible** - a v1.0
+plugin never touches any of this and loads and runs unchanged; a v1.1 plugin is
+refused by a host too old to understand it (the host applies
+`tessera_abi_compatible()`: major must match, minor must be `<=` the host's).
+
+A v1.1 host maps a second lock-free SPSC queue into the plugin at a fixed
+address, `TESSERA_EVENT_QUEUE_VA`, carrying the block's MIDI-shaped note/CC
+events and a transport snapshot. It is the exact mirror of the parameter queue
+(§control input), read from `plugin_process_block`:
+
+```c
+#include "tessera.h"      /* SDK: the queue layout + reader */
+
+tessera_note_event_t ev;
+while (tessera_event_read(TESSERA_EVENT_QUEUE, &ev)) {
+    switch (ev.type) {
+    case TESSERA_EV_NOTE_ON:  voice_on(ev.data1, ev.data2);  break;  /* note, velocity */
+    case TESSERA_EV_NOTE_OFF: voice_off(ev.data1);           break;
+    case TESSERA_EV_CC:       cc(ev.channel, ev.data1, ev.data2); break;
+    }
+}
+
+tessera_transport_t t;
+tessera_transport_read(TESSERA_EVENT_QUEUE, &t);   /* tempo_mbpm, bar/beat/tick, ppq */
+```
+
+The event surface unlocks synth voices, arpeggiators, and MIDI effects. The
+concrete layout (`tessera_event_queue_t`, `tessera_note_event_t`,
+`tessera_transport_t`, the magic and VA) is part of the host contract and lives
+in [`sdk/tessera.h`](../sdk/tessera.h); the drain (`tessera_event_read`) and the
+transport read are in `libtessera.a`. Reading the queue obeys the same real-time
+rules as everything else in `process_block`: it is wait-free and allocation-free.

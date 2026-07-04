@@ -814,7 +814,8 @@ test-arm-sandbox: | $(ARM_BUILD_DIR)
 
 # Host unit tests for the plugin SDK library (issue #38): tessera_sinf accuracy,
 # tessera_clampf, tessera_param_queue_read.  Built against the SDK headers only.
-ARM_SDK_TEST_SRCS = tests/arm64/sdk_test.c sdk/lib/tessera_math.c sdk/lib/tessera_param.c
+ARM_SDK_TEST_SRCS = tests/arm64/sdk_test.c sdk/lib/tessera_math.c sdk/lib/tessera_param.c \
+                    sdk/lib/tessera_event.c
 test-sdk: verify-sdk-abi-sync | $(ARM_BUILD_DIR)
 	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
 	      -Isdk $(ARM_SDK_TEST_SRCS) -o $(ARM_BUILD_DIR)/sdk_test -lm

@@ -70,6 +70,41 @@ int main(void)
     q.hdr.magic = 0; q.hdr.head = 4;
     CHECK(tessera_param_queue_read(&q.hdr, &id, &v) == 0, "queue read: bad magic -> 0");
 
+    /* ---- ABI v1.1: note events + transport (issue #124) ---- */
+    CHECK(tessera_abi_compatible((1u << 16) | 0u) == 1, "v1.0 plugin accepted on this host");
+    CHECK(tessera_abi_compatible((1u << 16) | 1u) == 1, "v1.1 plugin accepted");
+    CHECK(tessera_abi_compatible((1u << 16) | 2u) == 0, "v1.2 (newer minor) refused");
+    CHECK(tessera_abi_compatible((2u << 16) | 0u) == 0, "v2.0 (newer major) refused");
+
+    struct {
+        tessera_event_queue_t hdr;
+        tessera_note_event_t  ev[4];
+    } eq;
+    memset(&eq, 0, sizeof(eq));
+    eq.hdr.magic = TESSERA_EVENT_QUEUE_MAGIC;
+    eq.hdr.capacity = 4; eq.hdr.mask = 3;
+    eq.hdr.transport.flags = TESSERA_TRANSPORT_PLAYING;
+    eq.hdr.transport.tempo_mbpm = 120000;   /* 120 BPM */
+    eq.hdr.transport.ppq = 96;
+    eq.ev[0].type = TESSERA_EV_NOTE_ON; eq.ev[0].data1 = 60; eq.ev[0].data2 = 100;
+    eq.ev[1].type = TESSERA_EV_CC;      eq.ev[1].data1 = 74; eq.ev[1].data2 = 64;
+    eq.hdr.head = 2; eq.hdr.tail = 0;
+
+    tessera_note_event_t ev;
+    CHECK(tessera_event_read(&eq.hdr, &ev) == 1 && ev.type == TESSERA_EV_NOTE_ON &&
+          ev.data1 == 60 && ev.data2 == 100, "event read: note-on 60 vel 100");
+    CHECK(tessera_event_read(&eq.hdr, &ev) == 1 && ev.type == TESSERA_EV_CC &&
+          ev.data1 == 74 && ev.data2 == 64, "event read: CC 74 = 64");
+    CHECK(tessera_event_read(&eq.hdr, &ev) == 0, "event read: empty -> 0");
+
+    tessera_transport_t tr;
+    tessera_transport_read(&eq.hdr, &tr);
+    CHECK((tr.flags & TESSERA_TRANSPORT_PLAYING) && tr.tempo_mbpm == 120000 && tr.ppq == 96,
+          "transport read: playing, 120 BPM, 96 ppq");
+
+    eq.hdr.magic = 0;
+    CHECK(tessera_event_read(&eq.hdr, &ev) == 0, "event read: bad magic -> 0");
+
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;
 }

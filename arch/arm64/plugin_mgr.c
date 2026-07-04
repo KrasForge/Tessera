@@ -128,8 +128,7 @@ long pm_load(plugin_mgr_t *m, const char *path)
      * before plugin_init() is ever entered.  A faulting / missing handshake
      * (-1) or a mismatched major rejects the load and tears the process down. */
     long ver = plugin_call_abi_version(&s->plugin);
-    if (ver < 0 ||
-        ((uint32_t)ver >> 16) != TESSERA_PLUGIN_ABI_VERSION_MAJOR) {
+    if (ver < 0 || !tessera_abi_compatible((uint32_t)ver)) {
         process_destroy(s->plugin.proc);
         return PM_EABI;
     }
