@@ -373,3 +373,26 @@ header+payload under a provisioning boot key.
 Reuses `arch/arm64/sha256.c`; integer-only and libc-free, so it links into the
 first-stage / kernel. The on-board first-stage loader that runs this is hardware;
 the verify and measure logic is validated by `make test-arm-secureboot`.
+
+## Lock-free queue race verification (Theme M22, issue #197)
+
+The SPSC rings - the audio-core sample ring (`arch/arm64/spsc_ring.c`) and the
+parameter/event queue (`arch/arm64/param_queue.c`) - are the load-bearing
+primitive of the whole wait-free design: the audio thread drains them with no
+lock and no syscall, relying entirely on a per-side acquire/release-ordered
+index. A subtle memory-ordering bug there would not show up on a given run yet
+would silently break the real-time guarantee under contention.
+
+The existing threaded stress runs under AddressSanitizer, which cannot see a data
+race. `tests/arm64/queue_race_test.c` runs a real producer/consumer pair over both
+rings under **ThreadSanitizer**, so a missing acquire/release or a torn publish is
+caught, not merely "didn't happen to manifest". It checks both the ordering (TSan)
+and the semantics: every item is received exactly once, in order, with an untorn
+payload; the 32-bit head/tail counters are pre-seeded near `UINT32_MAX` so the
+unsigned index wrap is exercised mid-run.
+
+The harness is self-validating: downgrading the producer's release-store to
+`relaxed` makes TSan report a data race in the consumer, so a green run genuinely
+verifies the ordering rather than passing vacuously. `make test-arm-queue-race`
+(a separate TSan build - it cannot be combined with ASan); wired into the M4
+audio-core CI job.
