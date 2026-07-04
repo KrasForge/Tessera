@@ -93,7 +93,7 @@ int caps_supports_rate (const plugin_caps_t *c, uint32_t sr);
 int caps_supports_block(const plugin_caps_t *c, uint32_t block);
 
 /* Negotiate a config.  If (host_sr, host_block) is directly acceptable, writes
- * them to *out_sr/*out_block and returns 1.  Otherwise writes the plugin's
+ * them to out_sr / out_block and returns 1.  Otherwise writes the plugin's
  * nearest workable config (closest supported rate; host_block clamped to
  * [block_min, block_max]) and returns 0, so the host can resample/re-buffer or
  * reject.  Returns -1 only if the plugin advertises no workable config at all. */

@@ -1289,6 +1289,33 @@ test-arm-offline-host: | $(ARM_BUILD_DIR)
 	      -Iinclude $(ARM_OFFLINE_SRCS) -o $(ARM_BUILD_DIR)/offline_host -lm
 	$(ARM_BUILD_DIR)/offline_host --selftest
 
+# Reference synth + sampler plugins (Theme M15, #167).  The offline host renders
+# each (build/link check that they are offline-host-compatible); the host tests
+# drive them through the C ABI and check pitch/audio and the embedded presets.
+SDK_DSP_SRCS = sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c
+offline-host-synth: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O2 -DHOSTTEST -Isdk \
+	      tools/offline_host.c plugins/synth_fm/main.c sdk/lib/tessera_synth.c $(SDK_DSP_SRCS) \
+	      -o $(ARM_BUILD_DIR)/offline_host_synth -lm
+offline-host-sampler: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O2 -DHOSTTEST -Isdk \
+	      tools/offline_host.c plugins/sampler/main.c sdk/lib/tessera_sampler.c $(SDK_DSP_SRCS) \
+	      -o $(ARM_BUILD_DIR)/offline_host_sampler -lm
+
+ARM_REFSYNTH_TEST_SRCS = tests/arm64/ref_synth_test.c plugins/synth_fm/main.c \
+                         sdk/lib/tessera_synth.c $(SDK_DSP_SRCS) $(ARCH_ARM_DIR)/presets.c
+test-arm-ref-synth: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined -DHOSTTEST \
+	      -Isdk -I$(ARCH_ARM_DIR) $(ARM_REFSYNTH_TEST_SRCS) -o $(ARM_BUILD_DIR)/ref_synth_test -lm
+	$(ARM_BUILD_DIR)/ref_synth_test
+
+ARM_REFSAMP_TEST_SRCS = tests/arm64/ref_sampler_test.c plugins/sampler/main.c \
+                        sdk/lib/tessera_sampler.c $(SDK_DSP_SRCS) $(ARCH_ARM_DIR)/presets.c
+test-arm-ref-sampler: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined -DHOSTTEST \
+	      -Isdk -I$(ARCH_ARM_DIR) $(ARM_REFSAMP_TEST_SRCS) -o $(ARM_BUILD_DIR)/ref_sampler_test -lm
+	$(ARM_BUILD_DIR)/ref_sampler_test
+
 # Standalone AArch64 ELF for the filter plugin (and the other example plugins).
 $(ARM_BUILD_DIR)/plugin_effect_filter.elf: plugins/effect_filter/main.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/effect_filter.o
