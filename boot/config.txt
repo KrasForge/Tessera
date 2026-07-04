@@ -1,0 +1,29 @@
+# boot/config.txt - Raspberry Pi 4 / CM4 firmware configuration for Tessera
+# (Theme M10, issue #105).
+#
+# Copy this file, together with build/arm/kernel8.img, onto the FAT boot
+# partition of the SD/eMMC card. The VideoCore firmware reads config.txt at
+# power-on and loads kernel8.img at 0x80000 in 64-bit mode.
+
+# Boot the 64-bit (AArch64) kernel image.
+arm_64bit=1
+kernel=kernel8.img
+
+# Load the kernel at the address our linker script expects (arch/arm64/kernel.ld
+# links for 0x80000, the AArch64 default) and do not let the firmware relocate it.
+kernel_address=0x80000
+
+# Use the PL011 UART0 as the primary console on GPIO 14/15 (115200 8N1), which is
+# what drivers/uart_pl011.c drives. This detaches UART0 from Bluetooth and pins
+# the core clock so the UART baud rate is stable.
+enable_uart=1
+dtoverlay=disable-bt
+core_freq=500
+
+# We drive the DAC ourselves over the PCM/I2S peripheral (drivers/i2s.c), so the
+# firmware's own audio and I2C/SPI overlays stay off.
+dtparam=audio=off
+
+# Minimal GPU carve-out: Tessera never uses the VideoCore for graphics, so give
+# the memory back to the ARM cores.
+gpu_mem=16
