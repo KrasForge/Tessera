@@ -190,6 +190,9 @@ jobs:
       - name: Audio-core host unit tests (lock-free ring + watchdog, ASan + UBSan)
         run: make test-arm-smp
 
+      - name: Lock-free queue race verification (SPSC ring + param queue under ThreadSanitizer)
+        run: make test-arm-queue-race QUEUE_RACE_N=2000000
+
       - name: Dedicated audio-core SMP test on QEMU virt (4 cores via PSCI)
         run: make test-arm-smp-qemu CROSS_COMPILE=aarch64-linux-gnu-
 

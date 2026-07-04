@@ -530,6 +530,18 @@ test-arm-smp: | $(ARM_BUILD_DIR)
 	      $(ARM_SMP_TEST_SRCS) -o $(ARM_SMP_TEST_BIN) -lpthread
 	$(ARM_SMP_TEST_BIN)
 
+# Concurrency verification of the lock-free queues (Theme M22, #197).  Runs a
+# real producer/consumer thread pair over the SPSC ring and the parameter queue
+# under ThreadSanitizer, so a missing acquire/release or a torn publish is caught
+# (TSan is a separate build - it cannot be combined with ASan).  QUEUE_RACE_N
+# overrides the item count (smaller for a quick CI gate).
+QUEUE_RACE_N ?= 5000000
+ARM_QRACE_TEST_SRCS = tests/arm64/queue_race_test.c $(ARCH_ARM_DIR)/spsc_ring.c $(ARCH_ARM_DIR)/param_queue.c
+test-arm-queue-race: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=thread \
+	      -I$(ARCH_ARM_DIR) $(ARM_QRACE_TEST_SRCS) -o $(ARM_BUILD_DIR)/queue_race_test -lpthread
+	$(ARM_BUILD_DIR)/queue_race_test $(QUEUE_RACE_N)
+
 # Host unit tests for the audio-latency statistics (issue #22): min/max/mean/
 # stddev over the callback window, integer sqrt, and the cycles->us conversion.
 ARM_LAT_TEST_SRCS = tests/arm64/latency_test.c $(ARCH_ARM_DIR)/latency.c
