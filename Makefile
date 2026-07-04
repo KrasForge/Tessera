@@ -839,6 +839,14 @@ test-arm-dsp: | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_DSP_TEST_SRCS) -o $(ARM_BUILD_DIR)/dsp_test -lm
 	$(ARM_BUILD_DIR)/dsp_test
 
+# Host unit tests for the wavetable + FM oscillators (Theme M15, #164).  -lm is
+# used only for the Goertzel spectral probe; the oscillators use no libm.
+ARM_WTFM_TEST_SRCS = tests/arm64/wtfm_test.c sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c
+test-arm-wtfm: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk $(ARM_WTFM_TEST_SRCS) -o $(ARM_BUILD_DIR)/wtfm_test -lm
+	$(ARM_BUILD_DIR)/wtfm_test
+
 # Host unit tests for the reference effects suite (Theme B, issue #111):
 # overdrive, compressor, 3-band EQ, delay, chorus, noise gate, reverb, tuner -
 # each composed from the DSP building blocks.  -lm is used only to synthesise the

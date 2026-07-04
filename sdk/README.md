@@ -24,6 +24,13 @@ Tessera kernel sources or headers are required.
   low/high shelf) with a per-sample `tessera_biquad_process`.
 - **`tessera_osc_*`** - sine / saw / square / triangle oscillators (saw and square
   are polyBLEP anti-aliased).
+- **`tessera_wt_*`** - a wavetable oscillator that plays a caller-supplied
+  single-cycle table; give it a per-octave *mip stack* (each table band-limited to
+  fewer harmonics) and it selects the alias-free table for the pitch.
+  `tessera_wt_bandlimit` fills a band-limited sawtooth table.
+- **`tessera_fm_op_*` / `tessera_fm2`** - phase-modulatable sine operators and a
+  two-operator FM voice (ratio + index); `tessera_synth` exposes them as the
+  `TESSERA_WAVE_FM` waveform via `tessera_synth_set_fm`.
 - **`tessera_delay_*`** - a fractional (interpolated) delay line over a
   caller-supplied buffer.
 - **`tessera_envfollow_*`** - a peak envelope follower with attack/release.

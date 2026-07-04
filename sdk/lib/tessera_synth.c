@@ -42,6 +42,7 @@ static float voice_osc(tessera_synth_t *s, tessera_voice_t *v)
     case TESSERA_WAVE_SAW:      return tessera_osc_saw(&v->osc);
     case TESSERA_WAVE_SQUARE:   return tessera_osc_square(&v->osc);
     case TESSERA_WAVE_TRIANGLE: return tessera_osc_triangle(&v->osc);
+    case TESSERA_WAVE_FM:       return tessera_fm2(&v->fm_car, &v->fm_mod, s->fm_index);
     case TESSERA_WAVE_SINE:
     default:                    return tessera_osc_sin(&v->osc);
     }
@@ -56,6 +57,7 @@ void tessera_synth_init(tessera_synth_t *s, tessera_voice_t *voices,
     s->waveform = TESSERA_WAVE_SINE;
     /* A gentle default patch; override with tessera_synth_set. */
     s->a_ms = 5.0f; s->d_ms = 60.0f; s->sustain = 0.7f; s->r_ms = 120.0f;
+    s->fm_ratio = 1.0f; s->fm_index = 0.0f;   /* FM off until set */
     s->age  = 0;
     for (int i = 0; i < n_voices; i++) {
         voices[i].active = 0;
@@ -78,6 +80,12 @@ void tessera_synth_set(tessera_synth_t *s, tessera_wave_t waveform,
         tessera_adsr_init(&s->voices[i].adsr, s->sr, a_ms, d_ms, sustain, r_ms);
         s->voices[i].adsr.stage = stage;
     }
+}
+
+void tessera_synth_set_fm(tessera_synth_t *s, float ratio, float index)
+{
+    s->fm_ratio = ratio < 0.0f ? 0.0f : ratio;
+    s->fm_index = index < 0.0f ? 0.0f : index;
 }
 
 /* Pick a voice for a new note: a free one if any, else steal the quietest
@@ -103,7 +111,14 @@ void tessera_synth_note_on(tessera_synth_t *s, int note, int velocity)
     v->note   = note;
     v->gain   = (float)velocity / 127.0f;
     v->born   = ++s->age;
-    tessera_osc_set(&v->osc, s->sr, tessera_note_to_hz(note));
+    float hz = tessera_note_to_hz(note);
+    tessera_osc_set(&v->osc, s->sr, hz);
+    /* Arm the FM operators too (used only by TESSERA_WAVE_FM); reset phase so a
+     * retrigger starts cleanly. */
+    tessera_fm_op_set(&v->fm_car, s->sr, hz);
+    tessera_fm_op_set(&v->fm_mod, s->sr, hz * s->fm_ratio);
+    v->fm_car.phase = 0.0f;
+    v->fm_mod.phase = 0.0f;
     tessera_adsr_init(&v->adsr, s->sr, s->a_ms, s->d_ms, s->sustain, s->r_ms);
     tessera_adsr_gate(&v->adsr, 1);
 }
