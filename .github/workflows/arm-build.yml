@@ -249,6 +249,9 @@ jobs:
       - name: Multi-channel I/O host unit tests (interleave + device<->graph routing, ASan + UBSan)
         run: make test-arm-multiio
 
+      - name: USB Audio Class host unit tests (UAC1 descriptor parse + iso framing, ASan + UBSan)
+        run: make test-arm-usbaudio
+
       - name: Budget enforcement on QEMU virt (preempt at boundary, mute, kill)
         run: make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-
 

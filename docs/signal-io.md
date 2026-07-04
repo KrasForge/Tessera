@@ -75,3 +75,28 @@ outputs zeros rather than reading out of range. int16 PCM, integer only - it run
 on the audio path.
 
 Covered by `make test-arm-multiio`.
+
+## USB audio (issue #133)
+
+A class-compliant USB DAC/ADC streams PCM over an isochronous endpoint. Two parts
+of that are pure logic, independent of the USB host controller, and live in
+`arch/arm64/usbaudio.c`.
+
+**Format discovery.** A device describes its stream in a USB Audio Class (UAC1)
+Format Type I descriptor - channel count, bytes per sample, bit resolution, and
+the discrete sample rates it supports (each a 24-bit little-endian value).
+`usb_audio_parse_format` walks the descriptor set and extracts it. The bytes come
+off the wire from an untrusted device, so the walk bounds-checks every field: a
+zero or oversized `bLength`, a descriptor running past the buffer, or a format
+that claims more sample rates than its length holds are all rejected rather than
+over-read (a zero `bLength` cannot loop forever).
+
+**Isochronous rate framing.** USB delivers one packet per (micro)frame at a fixed
+frame rate, but the audio rate rarely divides it evenly - 44100 Hz over 1000
+frames/s is 44.1 samples per frame. `usb_iso_next` uses the same exact fractional
+accounting as the transport: it carries a remainder so the endpoint sends 44 or 45
+samples each frame and 1000 frames deliver *exactly* 44100 samples. An integer
+ratio (48000/1000) is a constant 48; high-speed microframes (96000/8000) a
+constant 12.
+
+Covered by `make test-arm-usbaudio`.
