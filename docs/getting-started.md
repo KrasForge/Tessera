@@ -204,3 +204,21 @@ from the plugin body is a protocol violation.
 `plugin_process_block` and `plugin_set_param` to pure computation - no
 allocation, no syscalls, no blocking. See
 [ABI reference §5-6](plugin-abi.md#5-the-sandbox-what-a-plugin-may-touch).
+
+## Fast iteration: the offline host
+
+Before loading a plugin on hardware or QEMU, you can run it against a WAV file
+on the desktop with `tools/offline_host.c` (issue #128). It links your plugin's
+C directly and drives its ABI entry points block by block:
+
+```sh
+make offline-host                       # builds build/arm/offline_host (vs the reference low-pass)
+build/arm/offline_host in.wav out.wav             # process a file
+build/arm/offline_host in.wav out.wav automation.csv   # with parameter automation
+```
+
+`automation.csv` holds `frame,param_id,value` lines that schedule
+`plugin_set_param()` calls, so an effect can be swept over time. To point it at
+your own plugin, link your plugin source instead of `plugins/effect_filter/main.c`
+in the `ARM_OFFLINE_SRCS` make variable. `make test-arm-offline-host` runs a
+self-test (WAV round-trip plus a low-pass check) that needs no files.
