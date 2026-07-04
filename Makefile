@@ -555,6 +555,17 @@ test-arm-mem-quota: | $(ARM_BUILD_DIR)
 	      $(ARM_MQ_TEST_SRCS) -o $(ARM_MQ_TEST_BIN)
 	$(ARM_MQ_TEST_BIN)
 
+# Host unit tests for glitch-free crossfade patch switching (Theme A:
+# reliability): the fixed-point Q15 mixer that swaps patches without a click.
+ARM_XF_TEST_SRCS = tests/arm64/xfade_test.c $(ARCH_ARM_DIR)/xfade.c
+ARM_XF_TEST_BIN  = $(ARM_BUILD_DIR)/xfade_test
+
+test-arm-patch-switch: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -DHOSTTEST -I$(ARCH_ARM_DIR) \
+	      $(ARM_XF_TEST_SRCS) -o $(ARM_XF_TEST_BIN)
+	$(ARM_XF_TEST_BIN)
+
 # Host unit tests for the ELF64 reader (issue #24).
 ARM_ELF_TEST_SRCS = tests/arm64/elf_test.c $(ARCH_ARM_DIR)/elf64.c
 ARM_ELF_TEST_BIN  = $(ARM_BUILD_DIR)/elf_test
@@ -1327,6 +1338,29 @@ test-arm-mem-quota-qemu: $(ARM_BUILD_DIR)/plugin_effect_filter.elf \
 	@grep -q "MEM-QUOTA: PASS" $(ARM_BUILD_DIR)/virt_mem_quota.log \
 	  && echo "QEMU virt mem-quota test PASSED" \
 	  || { echo "QEMU virt mem-quota test FAILED"; exit 1; }
+
+# Glitch-free crossfade patch switching on QEMU 'virt' (Theme A: reliability):
+# MMU off, single core, no plugins - the crossfade is pure kernel signal
+# handling.  Plays steady patch A, crossfades to patch B, plays steady B, and
+# asserts the switch is never silent, lands exactly on each patch, and is
+# click-free (the largest block step is far below an abrupt cut's step).
+VIRT_XF_ELF = $(ARM_BUILD_DIR)/virt_patch_switch.elf
+test-arm-patch-switch-qemu: | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/xf_start.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/xf_uart.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(VIRT_DIR)/xfade_main.c -o $(ARM_BUILD_DIR)/xf_main.o
+	$(ARM_CC) $(ARM_CFLAGS) -c $(ARCH_ARM_DIR)/xfade.c -o $(ARM_BUILD_DIR)/xf_xfade.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt.ld -o $(VIRT_XF_ELF) \
+	    $(ARM_BUILD_DIR)/xf_start.o $(ARM_BUILD_DIR)/xf_main.o \
+	    $(ARM_BUILD_DIR)/xf_uart.o $(ARM_BUILD_DIR)/xf_xfade.o
+	rm -f $(ARM_BUILD_DIR)/virt_patch_switch.log
+	-timeout 15 qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_patch_switch.log -net none \
+	    -kernel $(VIRT_XF_ELF) >/dev/null 2>&1
+	@cat $(ARM_BUILD_DIR)/virt_patch_switch.log
+	@grep -q "PATCH-SWITCH: PASS" $(ARM_BUILD_DIR)/virt_patch_switch.log \
+	  && echo "QEMU virt patch-switch test PASSED" \
+	  || { echo "QEMU virt patch-switch test FAILED"; exit 1; }
 
 # ---- M7: live parameter changes (issue #33) -------------------------------
 # Integration host test: CC -> param map -> lock-free queue -> filter, checking
