@@ -27,6 +27,8 @@
 #include "exceptions.h"
 #include "usermode.h"
 #include "uart_pl011.h"
+#include "denorm.h"
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -44,6 +46,17 @@ void fpu_disable(void);
 
 #define MAX_TASKS  8
 #define FPU_AREA   528   /* q0..q31 (512) + FPSR/FPCR, padded */
+#define FPU_FPCR_OFF 516 /* FPCR word within the FPU save area (see context_switch.S) */
+
+/* Zero a task's FPU save area and seed its FPCR with flush-to-zero on, so the
+ * task inherits denormal protection the moment its FP context is restored
+ * (Theme H, issue #130). */
+static void fpu_area_init(uint8_t *fpu)
+{
+    memset(fpu, 0, FPU_AREA);
+    uint32_t fpcr = denorm_fpcr_default();
+    memcpy(fpu + FPU_FPCR_OFF, &fpcr, sizeof fpcr);
+}
 
 typedef struct {
     process_t        *p;
@@ -115,7 +128,7 @@ int sched_add(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
     sched_task_t *t = &g_task[g_ntask];
     t->p = p;
     t->live = 1;
-    memset(t->fpu, 0, FPU_AREA);
+    fpu_area_init(t->fpu);
     init_frame(&t->ctx, entry, user_sp, arg0, /*irq_on=*/0);
     return g_ntask++;
 }
@@ -130,7 +143,7 @@ int sched_add_prio(process_t *p, uint64_t entry, uint64_t user_sp,
     sched_task_t *t = &g_task[idx];
     t->p = p;
     t->live = 1;
-    memset(t->fpu, 0, FPU_AREA);
+    fpu_area_init(t->fpu);
     init_frame(&t->ctx, entry, user_sp, arg0, /*irq_on=*/1);
     rq_add(idx, prio, quantum);
     g_preempt = 1;
