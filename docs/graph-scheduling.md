@@ -142,3 +142,21 @@ consumer (an explicit one-block delay), so it imposes no same-block ordering.
 
 Covered by `make test-arm-graph` (the feedback-edge cases) and the existing
 `make test-arm-gsched` planner tests.
+
+## Mixer / routing primitives (issue #118)
+
+Real signal chains need summing, level and pan, a wet/dry blend, and a true
+bypass. `arch/arm64/mixer.c` provides these as Q15 fixed-point operations on the
+int16 PCM blocks, so the mixer, send/return, and gain/pan graph nodes run on the
+`-mgeneral-regs-only` audio path:
+
+- **`mix_gain` / `mix_add`** - apply a gain, or accumulate a source into a bus,
+  saturating on overflow (summing several inputs into one mix bus).
+- **`mix_pan`** - mono to a stereo pair with a linear (constant-gain) law
+  (`0` = hard left, `MIX_ONE` = hard right).
+- **`mix_blend`** - wet/dry blend, the same unity-sum mix as the crossfade
+  (#103), so a `dry == wet` blend is transparent.
+- **`mix_bypass`** - true bypass, the dry signal bit-for-bit (pairs with a
+  hardware relay for analog bypass).
+
+Covered by `make test-arm-mixer`.

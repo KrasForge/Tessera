@@ -391,6 +391,9 @@ jobs:
       - name: Audio-graph model host unit tests (toposort + validation, ASan + UBSan)
         run: make test-arm-graph
 
+      - name: Mixer / routing host unit tests (gain/pan/wet-dry/bypass, ASan + UBSan)
+        run: make test-arm-mixer
+
       - name: Multi-plugin graph processes in topological order on QEMU virt
         run: make test-arm-graph-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
