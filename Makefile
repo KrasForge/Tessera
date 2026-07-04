@@ -552,6 +552,14 @@ test-arm-safe-bypass: | $(ARM_BUILD_DIR)
 	      $(ARM_SB_TEST_SRCS) -o $(ARM_SB_TEST_BIN)
 	$(ARM_SB_TEST_BIN)
 
+# Chaos-mode resilience gate (Theme M16, #170): a seeded fault-injection soak
+# over a multi-effect chain asserting safe-mode bypass keeps the DAC gap-free.
+ARM_CHAOS_TEST_SRCS = tests/arm64/chaos_test.c $(ARCH_ARM_DIR)/safe_bypass.c
+test-arm-chaos: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_CHAOS_TEST_SRCS) -o $(ARM_BUILD_DIR)/chaos_test
+	$(ARM_BUILD_DIR)/chaos_test
+
 # Host unit tests for the per-plugin memory quota (Theme A: reliability): the
 # charge/limit accounting that refuses an over-budget plugin at load.
 ARM_MQ_TEST_SRCS = tests/arm64/mem_quota_test.c

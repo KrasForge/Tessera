@@ -602,6 +602,9 @@ jobs:
       - name: Safe-mode bypass host unit tests (resolve logic, ASan + UBSan)
         run: make test-arm-safe-bypass
 
+      - name: Chaos-mode resilience gate (seeded fault-injection soak, zero dropouts, ASan + UBSan)
+        run: make test-arm-chaos
+
       - name: Never-go-silent safe-mode bypass on QEMU virt (effect dies -> dry passthrough)
         run: make test-arm-safe-bypass-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
