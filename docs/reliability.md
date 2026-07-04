@@ -220,8 +220,70 @@ never-silent=6/6  leak: baseline=... after=... no-leak=1
 - **no-leak** - unloading everything returns the frame allocator to baseline, so
   the retired address space was fully reclaimed.
 
-## Planned in this theme
+## Crash black-box
 
-Further never-go-silent work (to be built to the same bar - mechanism, host
-tests, a QEMU harness): a crash black-box that persists the last blocks and the
-faulting plugin across a reboot.
+When a plugin faults, isolation lets Tessera catch and kill it while the audio
+keeps running (M8/M12) - but the evidence of *why* it died is gone by the next
+reboot. The black box (`arch/arm64/blackbox.c`) is a flight recorder: it keeps
+the last N DAC-bound blocks in a small circular buffer, and when a plugin is
+killed it freezes a snapshot - those blocks plus the faulting plugin's identity
+and the fault cause - and serialises it to a reserved store that survives a
+reboot. After the reboot the snapshot is parsed back for post-mortem: which
+plugin, why, and exactly what the audio was doing in the blocks leading up to
+the fault.
+
+This is trivial **because** of isolation - the fault is contained to one address
+space, so the recorder and the store are intact after the kill. On a
+single-process host a crash takes down the whole engine, recorder and all, and
+there is nothing left to persist.
+
+### Mechanism
+
+- the recorder keeps the last `BB_BLOCKS` blocks in a circular buffer, copied as
+  raw 32-bit words (FP-free);
+- on a kill, `bb_capture` freezes the faulting plugin's pid, name, and cause
+  (MMU abort / forbidden syscall / budget overrun) and latches - the first
+  crash wins;
+- the snapshot serialises little-endian with an FNV-1a checksum, so a corrupt
+  store is rejected on parse rather than yielding a bogus post-mortem;
+- after a reboot, `bb_parse` recovers the identity and the pre-crash blocks
+  bit-for-bit.
+
+### How it is reproduced
+
+```
+# Pure recorder + serialise/parse (host, deterministic):
+make test-arm-blackbox
+
+# End to end on QEMU virt:
+make test-arm-blackbox-qemu CROSS_COMPILE=aarch64-linux-gnu-
+```
+
+The QEMU harness (`tests/arm64/virt/blackbox_main.c`) records the reference
+effect's blocks, injects a genuine EL0 fault (the M8 crash plugin, MMU-caught,
+isolated run returns -1), captures the snapshot, serialises it, "reboots" into a
+fresh recorder, and recovers the post-mortem:
+
+```
+recorded=6/6 never-silent=6/6 fault-caught=1 serialized=... bytes
+recovered: pid=1 cause=1 block=6 name0=e count=4
+checks: identity=1 blocks-bit-exact=1 corrupt-rejected=1
+```
+
+- **fault-caught** - the fault was really contained (the isolated run returned
+  -1), not simulated.
+- **identity** - after the reboot the recovered snapshot names the faulting
+  plugin (pid, name) and the cause (MMU), at the right block index.
+- **blocks-bit-exact** - the last N pre-crash blocks survived the
+  serialise/reboot/parse cycle bit-for-bit.
+- **corrupt-rejected** - a single flipped byte in the store is rejected by the
+  checksum, so a post-mortem is never built from corrupt data.
+
+## Theme A complete
+
+The never-go-silent theme now spans the full resource and reliability story:
+safe-mode bypass (the audio path heals to dry-through when an effect dies),
+per-plugin memory quota (memory bounded like the M12 CPU budget and the SVC
+gate), glitch-free crossfaded patch switching, plugin hot-reload without a
+dropout, and this crash black-box. Each is contained to one address space -
+exactly what a single-process audio host cannot safely offer.

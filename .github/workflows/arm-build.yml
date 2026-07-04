@@ -559,6 +559,12 @@ jobs:
       - name: Plugin hot-reload on QEMU virt (live swap to a fresh isolated instance, no dropout)
         run: make test-arm-hot-reload-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Crash black-box host unit tests (recorder + serialise/parse, ASan + UBSan)
+        run: make test-arm-blackbox
+
+      - name: Crash black-box on QEMU virt (real fault -> capture -> reboot -> recover)
+        run: make test-arm-blackbox-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   sdk-tests:
     name: M9 plugin SDK - lib host test + build example from SDK + run on QEMU virt
     runs-on: ubuntu-22.04
