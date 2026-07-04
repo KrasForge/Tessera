@@ -946,6 +946,11 @@ test-arm-package: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_PKG_TEST_SRCS) -o $(ARM_BUILD_DIR)/package_test
 	$(ARM_BUILD_DIR)/package_test
 
+# Rust plugin SDK (Theme F, #126): the safe wrapper over the C ABI drives a gain
+# plugin through the generated exports.  Requires a host Rust toolchain (cargo).
+test-rust-sdk:
+	cd sdk/rust/tessera-plugin && cargo test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.

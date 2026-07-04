@@ -82,6 +82,14 @@ Unit-tested by `make test-arm-synth`.
 
 The full ABI specification is [`../docs/plugin-abi.md`](../docs/plugin-abi.md).
 
+## Writing plugins in Rust
+
+Plugins can also be written in Rust: [`rust/tessera-plugin`](rust/tessera-plugin)
+is a thin, safe wrapper over the same C ABI. Implement the `Plugin` trait over
+slices and invoke the `tessera_plugin!` macro to emit the five ABI exports - the
+pointer marshalling and instance lifecycle are handled for you. See its
+[README](rust/tessera-plugin/README.md); tested with `make test-rust-sdk`.
+
 ## Requirements
 
 - An AArch64 bare-metal GCC. The default toolchain triple is
