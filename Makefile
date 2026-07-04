@@ -898,6 +898,14 @@ test-arm-mixer: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_MIX_TEST_SRCS) -o $(ARM_BUILD_DIR)/mixer_test
 	$(ARM_BUILD_DIR)/mixer_test
 
+# Host unit tests for the control-surface mapping with MIDI-learn (Theme E, #120):
+# footswitch/encoder/expression/MIDI-CC bindings, value scaling, and learn mode.
+ARM_CTLMAP_TEST_SRCS = tests/arm64/ctlmap_test.c $(ARCH_ARM_DIR)/ctlmap.c
+test-arm-ctlmap: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_CTLMAP_TEST_SRCS) -o $(ARM_BUILD_DIR)/ctlmap_test
+	$(ARM_BUILD_DIR)/ctlmap_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.
