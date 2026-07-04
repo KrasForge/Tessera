@@ -287,3 +287,30 @@ per-plugin memory quota (memory bounded like the M12 CPU budget and the SVC
 gate), glitch-free crossfaded patch switching, plugin hot-reload without a
 dropout, and this crash black-box. Each is contained to one address space -
 exactly what a single-process audio host cannot safely offer.
+
+## Signed plugin packages (Theme F, issue #125)
+
+Isolation, memory/CPU quotas, and the syscall gate contain a *loaded* plugin;
+signed packages decide *whether to load it at all*. A plugin is distributed as a
+package - a fixed header (magic, format/ABI versions, a signing-key id, capability
+flags, and the plugin name), the ELF payload, and a trailing 32-byte MAC - and it
+is authenticated on-device before it is ever mapped (`arch/arm64/package.c`).
+
+- **Authenticity + integrity** come from an HMAC-SHA256 (`arch/arm64/sha256.c`,
+  verified against the NIST and RFC 4231 vectors) over the header and payload
+  under a provisioning key. The MAC is compared in constant time, so a wrong or
+  tampered package fails without leaking where it first differed. HMAC is
+  symmetric; a production build would swap in an asymmetric signature, but the
+  format, the bounds-checked parse, the revocation check, and the constant-time
+  compare are unchanged by the primitive.
+- **Revocation.** Each package names its signing-key id. A compromised signer's id
+  is added to a revocation list and its packages are rejected - after
+  authentication, so the id is trustworthy - without a firmware change.
+- **Untrusted input.** The verifier is fed an arbitrary blob, so every length is
+  checked against the buffer first: a blob too small for a header + MAC, a bad
+  magic or format, or an over-long declared payload length are all rejected before
+  any payload byte is read.
+
+The whole path is integer-only and links into the `-mgeneral-regs-only` kernel, so
+verification runs on-device. Covered by `make test-arm-sha256` and
+`make test-arm-package`.

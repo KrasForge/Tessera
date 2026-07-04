@@ -930,6 +930,22 @@ test-arm-osc: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_OSC_TEST_SRCS) -o $(ARM_BUILD_DIR)/osc_test
 	$(ARM_BUILD_DIR)/osc_test
 
+# Host unit tests for SHA-256 / HMAC-SHA256 (Theme F, #125) against the NIST and
+# RFC 4231 vectors, plus streaming and constant-time compare.
+ARM_SHA_TEST_SRCS = tests/arm64/sha256_test.c $(ARCH_ARM_DIR)/sha256.c
+test-arm-sha256: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_SHA_TEST_SRCS) -o $(ARM_BUILD_DIR)/sha256_test
+	$(ARM_BUILD_DIR)/sha256_test
+
+# Host unit tests for the signed plugin package format (Theme F, #125): build /
+# verify round-trip, MAC tamper detection, key revocation, malformed-input safety.
+ARM_PKG_TEST_SRCS = tests/arm64/package_test.c $(ARCH_ARM_DIR)/package.c $(ARCH_ARM_DIR)/sha256.c
+test-arm-package: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_PKG_TEST_SRCS) -o $(ARM_BUILD_DIR)/package_test
+	$(ARM_BUILD_DIR)/package_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.
