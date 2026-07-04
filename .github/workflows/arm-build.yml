@@ -280,6 +280,9 @@ jobs:
       - name: OLED UI model host unit tests (meters/browse/navigation/scroll, ASan + UBSan)
         run: make test-arm-oled-ui
 
+      - name: Scene / parameter morphing host unit tests (curves/hold/union, ASan + UBSan)
+        run: make test-arm-morph
+
       - name: Patch-bank / Program-Change host unit tests (banks, PC load, Bank Select, ASan + UBSan)
         run: make test-arm-bank
 

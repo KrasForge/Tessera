@@ -560,6 +560,15 @@ test-arm-looper: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_LOOPER_TEST_SRCS) -o $(ARM_BUILD_DIR)/looper_test
 	$(ARM_BUILD_DIR)/looper_test
 
+# Host unit tests for scene / parameter morphing (Theme M17, #173): the
+# interpolation curves, endpoint/hold behaviour, and the union eval.  Header-only
+# (morph.h), so nothing extra links into the kernel.
+ARM_MORPH_TEST_SRCS = tests/arm64/morph_test.c
+test-arm-morph: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_MORPH_TEST_SRCS) -o $(ARM_BUILD_DIR)/morph_test -lm
+	$(ARM_BUILD_DIR)/morph_test
+
 # Chaos-mode resilience gate (Theme M16, #170): a seeded fault-injection soak
 # over a multi-effect chain asserting safe-mode bypass keeps the DAC gap-free.
 ARM_CHAOS_TEST_SRCS = tests/arm64/chaos_test.c $(ARCH_ARM_DIR)/safe_bypass.c
