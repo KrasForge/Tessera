@@ -553,6 +553,12 @@ jobs:
       - name: Sandbox audit-helper host unit tests (containment + PTE, ASan + UBSan)
         run: make test-arm-sandbox
 
+      - name: SHA-256 / HMAC-SHA256 host unit tests (NIST + RFC 4231 vectors, ASan + UBSan)
+        run: make test-arm-sha256
+
+      - name: Signed-package host unit tests (verify/tamper/revoke/malformed, ASan + UBSan)
+        run: make test-arm-package
+
       - name: Sandbox airtight on QEMU virt (audit clean + catch mapping, SVC/mem kill)
         run: make test-arm-sandbox-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
