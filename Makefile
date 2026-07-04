@@ -1105,6 +1105,20 @@ test-arm-filter: | $(ARM_BUILD_DIR)
 	      -Iinclude $(ARM_FILTER_TEST_SRCS) -o $(ARM_FILTER_TEST_BIN) -lm
 	$(ARM_FILTER_TEST_BIN)
 
+# Offline plugin host (Theme G, #128): run a plugin against a WAV file on the
+# desktop, reusing the host-compiled plugin path.  Built against the reference
+# low-pass; `offline-host` builds the tool, `test-arm-offline-host` runs its
+# self-test (no files needed).
+ARM_OFFLINE_SRCS = tools/offline_host.c plugins/effect_filter/main.c
+offline-host: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O2 -Iinclude $(ARM_OFFLINE_SRCS) \
+	      -o $(ARM_BUILD_DIR)/offline_host -lm
+
+test-arm-offline-host: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Iinclude $(ARM_OFFLINE_SRCS) -o $(ARM_BUILD_DIR)/offline_host -lm
+	$(ARM_BUILD_DIR)/offline_host --selftest
+
 # Standalone AArch64 ELF for the filter plugin (and the other example plugins).
 $(ARM_BUILD_DIR)/plugin_effect_filter.elf: plugins/effect_filter/main.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/effect_filter.o
