@@ -123,3 +123,22 @@ each node shows its core.  `wN` is the worker on CPU N+1.
   synth's block counter across both transitions (bit-identical steady state,
   shifted by the pipeline latency), CPU0 must service every callback with
   zero overruns, and the never-scheduled third worker must stay parked.
+
+## Feedback edges (one-block delay, issue #117)
+
+The graph is a strict DAG for same-block scheduling, but feedback-delay and
+reverb topologies need a cycle.  A **feedback edge** closes that cycle without
+breaking the schedule: it carries the producer's *previous* block to its
+consumer (an explicit one-block delay), so it imposes no same-block ordering.
+
+- `audio_graph_connect_feedback(g, src, dst)` (control plane:
+  `gc_connect_feedback`) marks the edge feedback.
+- `audio_graph_toposort` excludes feedback edges from the in-degree, so a graph
+  whose only cycle is closed by feedback edges still sorts - while a cycle closed
+  by a **normal** edge is still rejected (`-1`).
+- The multi-core planner (`graph_sched.c`) treats a feedback edge as delayed:
+  it does not pin the consumer to the producer's core and is not counted as a
+  same-block cross-core barrier.
+
+Covered by `make test-arm-graph` (the feedback-edge cases) and the existing
+`make test-arm-gsched` planner tests.

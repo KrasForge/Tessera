@@ -166,6 +166,47 @@ static void test_input_node(void)
     CHECK(audio_graph_add_input(&g) >= 0, "a fresh input can be re-added");
 }
 
+static void test_feedback_edges(void)
+{
+    printf("- feedback edges: a one-block delay breaks a cycle for scheduling (#117)\n");
+    audio_graph_t g;
+    audio_graph_init(&g, valid_pid);
+    int a   = audio_graph_add_node(&g, 1);
+    int b   = audio_graph_add_node(&g, 2);
+    int dac = audio_graph_add_dac(&g);
+
+    CHECK(audio_graph_connect(&g, a, b) >= 0, "a -> b (forward) ok");
+    int fe = audio_graph_connect_feedback(&g, b, a);   /* closes the cycle */
+    CHECK(fe >= 0, "b -> a (feedback) accepted");
+    CHECK(audio_graph_edge_is_feedback(&g, fe) == 1, "the edge is marked feedback");
+    CHECK(audio_graph_edge_is_feedback(&g, audio_graph_find_edge(&g, a, b)) == 0,
+          "the forward edge is not feedback");
+    audio_graph_connect(&g, b, dac);
+
+    int order[GRAPH_MAX_NODES];
+    int n = audio_graph_toposort(&g, order, GRAPH_MAX_NODES);
+    CHECK(n == 3, "a graph with a feedback cycle still sorts (no error)");
+    int ia = index_of(order, n, a), ib = index_of(order, n, b);
+    CHECK(ia < ib, "the forward edge orders a before b; the feedback edge is ignored");
+    CHECK(order[n - 1] == dac, "DAC still last");
+
+    /* Contrast: the same cycle with a *normal* back-edge is still rejected. */
+    audio_graph_t g2;
+    audio_graph_init(&g2, valid_pid);
+    int x = audio_graph_add_node(&g2, 1), y = audio_graph_add_node(&g2, 2);
+    audio_graph_connect(&g2, x, y);
+    audio_graph_connect(&g2, y, x);                    /* normal back-edge */
+    CHECK(audio_graph_toposort(&g2, order, GRAPH_MAX_NODES) == -1,
+          "a normal back-edge is still a rejected cycle");
+
+    /* find + disconnect work on a feedback edge. */
+    CHECK(audio_graph_find_edge(&g, b, a) == fe, "feedback edge found by src/dst");
+    audio_graph_disconnect(&g, b, a);
+    CHECK(audio_graph_find_edge(&g, b, a) == -1, "feedback edge disconnected");
+    CHECK(audio_graph_toposort(&g, order, GRAPH_MAX_NODES) == 3,
+          "graph still sorts after the feedback edge is removed");
+}
+
 int main(void)
 {
     printf("=== Tessera audio-graph tests (issue #27) ===\n");
@@ -176,6 +217,7 @@ int main(void)
     test_rules();
     test_full();
     test_input_node();
+    test_feedback_edges();
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;
 }

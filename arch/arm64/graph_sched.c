@@ -79,7 +79,9 @@ int graph_plan_compute(const audio_graph_t *g, int n_workers, graph_plan_t *p)
          * same-block latency - until that core is at its share. */
         int pick = -1;
         for (int e = 0; e < GRAPH_MAX_EDGES; e++) {
-            if (!g->edges[e].used || g->edges[e].dst != n)
+            /* Feedback edges are one-block-delayed: they impose no same-block
+             * producer->consumer ordering, so they do not pin the core. */
+            if (!g->edges[e].used || g->edges[e].dst != n || g->edges[e].feedback)
                 continue;
             int up = p->core[g->edges[e].src];
             if (up >= 0) {
@@ -108,7 +110,9 @@ int graph_plan_compute(const audio_graph_t *g, int n_workers, graph_plan_t *p)
         p->edge[e].dst  = g->edges[e].dst;
         p->edge[e].ring = g->edges[e].ring;
         p->edge[e].cross = (p->core[g->edges[e].src] != p->core[g->edges[e].dst]);
-        if (p->edge[e].cross && g->edges[e].dst != g->dac_node)
+        /* A feedback edge is read from the previous block, so a cross-core
+         * feedback edge is not a same-block barrier and is not counted. */
+        if (p->edge[e].cross && !g->edges[e].feedback && g->edges[e].dst != g->dac_node)
             p->cross_edges++;
     }
 

@@ -81,7 +81,7 @@ static int node_live(const audio_graph_t *g, int n)
     return n >= 0 && n < GRAPH_MAX_NODES && g->nodes[n].type != NODE_UNUSED;
 }
 
-int audio_graph_connect(audio_graph_t *g, int src, int dst)
+static int connect_ex(audio_graph_t *g, int src, int dst, int feedback)
 {
     if (!node_live(g, src) || !node_live(g, dst) || src == dst)
         return -1;
@@ -98,15 +98,31 @@ int audio_graph_connect(audio_graph_t *g, int src, int dst)
 
     for (int e = 0; e < GRAPH_MAX_EDGES; e++) {
         if (!g->edges[e].used) {
-            g->edges[e].used = 1;
-            g->edges[e].src  = src;
-            g->edges[e].dst  = dst;
-            g->edges[e].ring = (void *)0;
+            g->edges[e].used     = 1;
+            g->edges[e].src      = src;
+            g->edges[e].dst      = dst;
+            g->edges[e].feedback = feedback;
+            g->edges[e].ring     = (void *)0;
             g->n_edges++;
             return e;
         }
     }
     return -1;                      /* edge table full */
+}
+
+int audio_graph_connect(audio_graph_t *g, int src, int dst)
+{
+    return connect_ex(g, src, dst, 0);
+}
+
+int audio_graph_connect_feedback(audio_graph_t *g, int src, int dst)
+{
+    return connect_ex(g, src, dst, 1);
+}
+
+int audio_graph_edge_is_feedback(const audio_graph_t *g, int e)
+{
+    return (e >= 0 && e < GRAPH_MAX_EDGES && g->edges[e].used && g->edges[e].feedback);
 }
 
 void audio_graph_set_edge_ring(audio_graph_t *g, int edge, void *ring)
@@ -181,8 +197,11 @@ int audio_graph_toposort(const audio_graph_t *g, int *order, int max)
     for (int i = 0; i < GRAPH_MAX_NODES; i++)
         if (g->nodes[i].type != NODE_UNUSED)
             indeg[i] = 0;
+    /* Feedback edges carry the previous block, so they impose no same-block
+     * ordering constraint - exclude them from the in-degree, which is exactly
+     * what breaks their cycle for scheduling. */
     for (int e = 0; e < GRAPH_MAX_EDGES; e++)
-        if (g->edges[e].used)
+        if (g->edges[e].used && !g->edges[e].feedback)
             indeg[g->edges[e].dst]++;
 
     if (max < g->n_nodes)
@@ -200,7 +219,7 @@ int audio_graph_toposort(const audio_graph_t *g, int *order, int max)
         order[count++] = pick;
         indeg[pick] = -2;              /* emitted */
         for (int e = 0; e < GRAPH_MAX_EDGES; e++)
-            if (g->edges[e].used && g->edges[e].src == pick)
+            if (g->edges[e].used && !g->edges[e].feedback && g->edges[e].src == pick)
                 indeg[g->edges[e].dst]--;
     }
 
