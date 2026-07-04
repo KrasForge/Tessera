@@ -259,6 +259,9 @@ jobs:
       - name: Control-surface mapping host unit tests (footswitch/encoder/expr/MIDI-learn, ASan + UBSan)
         run: make test-arm-ctlmap
 
+      - name: OLED UI model host unit tests (meters/browse/navigation/scroll, ASan + UBSan)
+        run: make test-arm-oled-ui
+
       - name: Shell-core host unit tests (tokenise + dispatch + fuzz, ASan + UBSan)
         run: make test-arm-shell
 
