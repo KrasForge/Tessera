@@ -55,3 +55,28 @@ reports on the press edge, so the queue sees one update per press, not two per
 press/release.
 
 Covered by `make test-arm-ctlmap`.
+
+## On-device OLED UI (issue #121)
+
+The other half of the front panel is the little screen. `arch/arm64/oled_ui.c` is
+the UI *model and layout*: a pure state machine that renders the current screen
+into a fixed 21x8 character grid, which the display driver blits through its font.
+Only the pixel font and the SSD1306/SH1106 bring-up are hardware; everything about
+*what the screen shows* and *how the buttons navigate* is pure and host-tested.
+
+Three screens, driven by four buttons (up / down / select / back):
+
+- **Home** - the title, live **CPU** and **headroom** bar meters (fed per-mille
+  from the profiler, issue #129, and drawn with `oled_ui_bar` as `[####----]`),
+  and the name of the currently loaded patch.
+- **Patches** - a scrolling list of patch names; up/down move the selection (it
+  wraps, and the view scrolls to keep it visible), select loads the patch and
+  opens its parameters, back returns home.
+- **Params** - a scrolling list of the loaded patch's parameters with their
+  values, right-aligned; back returns to the patch list.
+
+`oled_ui_render` fills the grid with space-padded ASCII (the selected row is
+marked with `>` and may additionally be inverted by the driver). Integer-only, no
+allocation - it can run wherever the display task lives.
+
+Covered by `make test-arm-oled-ui`.
