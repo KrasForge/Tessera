@@ -839,6 +839,13 @@ test-arm-transport: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_TP_TEST_SRCS) -o $(ARM_BUILD_DIR)/transport_test
 	$(ARM_BUILD_DIR)/transport_test
 
+# Host unit tests for tempo-synced note values and tap tempo (Theme C, #115).
+ARM_TS_TEST_SRCS = tests/arm64/tempo_sync_test.c $(ARCH_ARM_DIR)/tempo_sync.c
+test-arm-tempo-sync: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_TS_TEST_SRCS) -o $(ARM_BUILD_DIR)/tempo_sync_test
+	$(ARM_BUILD_DIR)/tempo_sync_test
+
 # Run the getting-started guide's build-and-verify steps verbatim (issue #39):
 # the single script that docs/getting-started.md quotes, so the guide is proven
 # on every change.  Pair with test-arm-sdk-qemu for the QEMU load step.

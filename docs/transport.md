@@ -38,6 +38,21 @@ set tempo (single block and block-by-block, no drift), bar/beat accounting in
 4/4 and 6/8, MIDI clock in (tempo estimate + position), MIDI clock out at
 24 PPQN, start/continue/stop, and the plugin-facing snapshot.
 
-The tempo-synced parameters and tap tempo (#115) and the arpeggiator (#116)
-build on this transport; the host wires the snapshot into each plugin's ABI v1.1
-event queue.
+The arpeggiator (#116) builds on this transport; the host wires the snapshot
+into each plugin's ABI v1.1 event queue.
+
+## Tempo-synced parameters and tap tempo (issue #115)
+
+`arch/arm64/tempo_sync.c` turns the transport tempo into musical parameter
+values, so a delay time or LFO rate locks to the beat instead of free-running:
+
+- **Note values** are `(mult, div)` fractions of a quarter note (`TS_QUARTER`,
+  `TS_EIGHTH`, `TS_DOT_EIGHTH`, `TS_TRIP_QUARTER`, ...). `tempo_sync_samples()`
+  and `tempo_sync_ms()` resolve one against the current tempo with exact integer
+  math - a quarter at 120 BPM is 24000 samples / 500 ms, and a tempo change
+  simply re-resolves it (the caller smooths the parameter to stay click-free).
+- **Tap tempo** (`taptempo_*`) averages the last few inter-tap intervals and
+  rejects a single outlier without lurching the tempo; two consistent taps far
+  from the current estimate adopt a new tempo.
+
+Covered by `make test-arm-tempo-sync`.
