@@ -55,6 +55,22 @@ uint64_t elf64_entry(const void *img)
     return ((const Elf64_Ehdr *)img)->e_entry;
 }
 
+uint32_t elf64_load_pages(const void *img, size_t len)
+{
+    const uint64_t PAGE = 4096ull;
+    uint16_t phnum = elf64_phnum(img, len);
+    uint64_t pages = 0;
+    for (uint16_t i = 0; i < phnum; i++) {
+        const Elf64_Phdr *ph = elf64_phdr(img, len, i);
+        if (!ph || ph->p_type != PT_LOAD || ph->p_memsz == 0)
+            continue;
+        uint64_t start = ph->p_vaddr & ~(PAGE - 1);
+        uint64_t end   = (ph->p_vaddr + ph->p_memsz + PAGE - 1) & ~(PAGE - 1);
+        pages += (end - start) / PAGE;
+    }
+    return (uint32_t)pages;
+}
+
 /* Locate the section header at index i. */
 static const Elf64_Shdr *shdr(const void *img, size_t len, uint16_t i)
 {
