@@ -56,3 +56,21 @@ values, so a delay time or LFO rate locks to the beat instead of free-running:
   from the current estimate adopt a new tempo.
 
 Covered by `make test-arm-tempo-sync`.
+
+## Arpeggiator / step-sequencer (issue #116)
+
+`arch/arm64/arp.c` turns a held chord into a timed note stream locked to the
+transport - the first note-generating node in the graph. It is monophonic (one
+note sounds at a time) and pure integer:
+
+- **Held set:** `arp_note_on` / `arp_note_off` keep the held notes sorted.
+- **Step:** every `step_ticks` transport ticks (e.g. `TP_PPQ/4` for 1/16 notes)
+  `arp_run` releases the previous note and sounds the next, chosen from the held
+  set by the mode - **up**, **down**, **up-down** (ping-pong, endpoints not
+  repeated), or **random** (a deterministic hash of the step, so it is
+  reproducible). One event pair per step, not per block.
+- **Clearing** the chord or disabling the arp emits a final note-off so nothing
+  hangs.
+
+The emitted note events feed a downstream synth (Theme B, #113) through the ABI
+v1.1 event queue (#124). Covered by `make test-arm-arp`.

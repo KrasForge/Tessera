@@ -90,6 +90,9 @@ jobs:
       - name: Tempo-sync + tap-tempo host unit tests (note values, tap estimator, ASan + UBSan)
         run: make test-arm-tempo-sync
 
+      - name: Arpeggiator host unit tests (up/down/updown/random patterns, ASan + UBSan)
+        run: make test-arm-arp
+
   audio-tests:
     name: M3 audio - I2S host math + QEMU virt API smoke
     runs-on: ubuntu-22.04
