@@ -842,6 +842,15 @@ test-arm-fx: | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_FX_TEST_SRCS) -o $(ARM_BUILD_DIR)/fx_test -lm
 	$(ARM_BUILD_DIR)/fx_test
 
+# Host unit tests for the IR convolution engine (Theme B, issue #112): the
+# convolution identities against a brute-force reference.  -lm only synthesises
+# the test signal; the engine itself uses no libm.
+ARM_CONV_TEST_SRCS = tests/arm64/conv_test.c sdk/lib/tessera_conv.c
+test-arm-conv: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk $(ARM_CONV_TEST_SRCS) -o $(ARM_BUILD_DIR)/conv_test -lm
+	$(ARM_BUILD_DIR)/conv_test
+
 # Host unit tests for the master transport (Theme C, issue #114): fixed-point
 # position advance, bar/beat accounting, MIDI clock in (tempo) and out (24 PPQN).
 ARM_TP_TEST_SRCS = tests/arm64/transport_test.c $(ARCH_ARM_DIR)/transport.c

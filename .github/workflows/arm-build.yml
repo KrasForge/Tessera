@@ -615,6 +615,9 @@ jobs:
       - name: SDK effects-suite host unit tests (overdrive/comp/EQ/delay/chorus/gate/reverb/tuner, ASan + UBSan)
         run: make test-arm-fx
 
+      - name: SDK IR-convolution host unit tests (cabinet-sim engine, ASan + UBSan)
+        run: make test-arm-conv
+
       - name: Build the example plugin using ONLY the SDK
         run: make -C sdk/examples/sine_plugin CROSS_COMPILE=aarch64-linux-gnu-
 
