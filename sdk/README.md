@@ -64,6 +64,18 @@ unit-tested by `make test-arm-fx`.
   (`tessera_conv_normgain` gives the worst-case gain for pre-scaling).
 
 Unit-tested by `make test-arm-conv`.
+
+### Polyphonic synth engine
+
+- **`tessera_synth_*`** - a voice allocator that turns ABI note events into
+  audio, proving the synth-voice path end to end. Feed it decoded note events
+  (`tessera_synth_event`) or call `tessera_synth_note_on/off` directly; each
+  voice is one of the SDK oscillators through an ADSR. It allocates a free voice
+  per note, steals the quietest under over-subscription, and reclaims a voice
+  when its release finishes. `tessera_note_to_hz` maps a MIDI note to its
+  frequency. Polyphony is set by the caller-supplied voice array.
+
+Unit-tested by `make test-arm-synth`.
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |
