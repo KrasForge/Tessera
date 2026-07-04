@@ -583,6 +583,9 @@ jobs:
       - name: Signed-package host unit tests (verify/tamper/revoke/malformed, ASan + UBSan)
         run: make test-arm-package
 
+      - name: Secure / measured boot host unit tests (image verify + measure chain, ASan + UBSan)
+        run: make test-arm-secureboot
+
       - name: Parser fuzz harness (OSC/USB/package/mailbox/presets, seeded, ASan + UBSan)
         run: make test-arm-fuzz
 
