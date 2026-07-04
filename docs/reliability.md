@@ -331,3 +331,19 @@ making it a CI gate rather than an occasional manual run. Each parser is fed bot
 fully random buffers and mutated copies of a valid seed message; adding a new
 parser is one entry in the target table. Covered by `make test-arm-fuzz` (60k
 rounds per parser).
+
+## Chaos-mode resilience gate (Theme M16, issue #170)
+
+The M8 resilience demo kills one malicious plugin and shows audio survives.
+`tests/arm64/chaos_test.c` generalises that into a continuous gate: over a long,
+**seeded** soak it injects faults - MMU abort, budget overrun, syscall abuse, and
+outright kill - into a multi-effect chain and, every block, asserts the platform's
+safe-mode bypass contains each one. A dead node passes its dry input through, so
+the DAC never sees a silent gap.
+
+Every round the harness drives a non-silent source block through the chain, kills
+and reloads nodes on a random schedule, and checks the invariants: each faulted
+node is bypassed and emits its dry input (identified and contained), and the
+DAC-bound block is never all-zero. A 20 000-round soak injects hundreds of faults
+and reloads with **zero dropouts**. Because it is deterministic it runs as a CI
+gate, not a one-off demo. Covered by `make test-arm-chaos`.
