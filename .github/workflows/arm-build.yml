@@ -547,6 +547,12 @@ jobs:
       - name: Per-plugin memory quota on QEMU virt (greedy plugin refused at load)
         run: make test-arm-mem-quota-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
+      - name: Glitch-free patch-switch host unit tests (crossfade mixer, ASan + UBSan)
+        run: make test-arm-patch-switch
+
+      - name: Glitch-free patch switching on QEMU virt (crossfade: never silent + click-free)
+        run: make test-arm-patch-switch-qemu CROSS_COMPILE=aarch64-linux-gnu-
+
   sdk-tests:
     name: M9 plugin SDK - lib host test + build example from SDK + run on QEMU virt
     runs-on: ubuntu-22.04

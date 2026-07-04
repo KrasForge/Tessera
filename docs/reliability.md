@@ -112,9 +112,62 @@ MEM-QUOTA: PASS
   the quota, not a broken plugin);
 - unloading everything returns the frame allocator exactly to baseline.
 
+## Glitch-free patch switching
+
+Swapping a patch mid-performance must not click. An abrupt cut from one graph's
+DAC-bound output to another's leaves a step discontinuity in the waveform - an
+audible click, the pedal equivalent of a scratchy switch. The crossfade
+(`arch/arm64/xfade.c`) runs both the outgoing patch A and the incoming patch B
+for a short window and mixes their blocks with a gain that ramps A down and B
+up, so the waveform moves *continuously* from A to B.
+
+### Mechanism
+
+The ramp is a raised-cosine (Hann) curve in Q15 fixed point:
+
+- its **slope is zero at both ends**, so the fade meets the steady signal on
+  either side with no kink;
+- the two gains **sum to exactly one** (`gA + gB == 32768`) at every step, so a
+  constant signal - or two identical patches - passes through the mix
+  bit-for-bit unchanged;
+- the mix is `dst = (A*gA + B*gB) >> 15` on the int16 PCM blocks: pure
+  fixed-point integer arithmetic, so it runs on the `-mgeneral-regs-only` audio
+  path with no floating point, like the rest of the kernel signal handling.
+
+The fade spans `XF_STEPS + 1` blocks; the first block is exactly A, the last
+exactly B, and B then becomes the running patch so the caller can retire A.
+
+### How it is reproduced
+
+```
+# Pure fixed-point mixer (host, deterministic):
+make test-arm-patch-switch
+
+# End to end on QEMU virt:
+make test-arm-patch-switch-qemu CROSS_COMPILE=aarch64-linux-gnu-
+```
+
+The QEMU harness (`tests/arm64/virt/xfade_main.c`) plays steady patch A
+(level 12000), crossfades to patch B (level 4000), and plays steady B, feeding
+every DAC-bound block through the mixer:
+
+```
+blocks=23 fade=17  pre-A=3/3 post-B=3/3 switches=1
+never-silent=23/23  fade 12000->4000 monotonic=1  max-step=781 (abrupt-cut=8000)  gains-unit=1
+PATCH-SWITCH: PASS
+```
+
+- **never-silent = 23/23** - every block carries sound, across the switch.
+- **pre-A / post-B exact** - before the fade the DAC is exactly patch A, after it
+  exactly patch B.
+- **monotonic, max-step = 781** - through the fade the level moves monotonically
+  A -> B, and the largest block-to-block step is **781**, an order of magnitude
+  below the **8000** step an abrupt cut would make. The abrupt step is the
+  click; the crossfade removes it.
+- **gains-unit = 1** - the two gains sum to unity at every ramp step.
+
 ## Planned in this theme
 
 Further never-go-silent work (each to be built to the same bar - mechanism, host
-tests, a QEMU harness): glitch-free crossfaded patch switching, plugin
-hot-reload without a dropout, and a crash black-box that persists the last
-blocks and the faulting plugin across a reboot.
+tests, a QEMU harness): plugin hot-reload without a dropout, and a crash
+black-box that persists the last blocks and the faulting plugin across a reboot.
