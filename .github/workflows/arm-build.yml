@@ -243,6 +243,9 @@ jobs:
       - name: Denormal-protection host unit tests (FPCR FTZ + subnormal flush, ASan + UBSan)
         run: make test-arm-denorm
 
+      - name: Sample-rate-conversion host unit tests (DC/2x/ratios/streaming, ASan + UBSan)
+        run: make test-arm-src
+
       - name: Budget enforcement on QEMU virt (preempt at boundary, mute, kill)
         run: make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-
 

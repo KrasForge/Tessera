@@ -28,3 +28,25 @@ normals, zeros, and infinities untouched. It is useful for portability and as th
 reference the tests check.
 
 Covered by `make test-arm-denorm`.
+
+## Sample-rate conversion / 96 kHz (issue #131)
+
+The audio path runs at a fixed device rate, but sources and sinks may want
+another: a plugin negotiated for 48 kHz feeding a 96 kHz DAC, a 44.1 kHz file
+player, or USB audio (issue #133) at yet another rate. `arch/arm64/src.c` bridges
+them - a streaming rational resampler that converts an int16 PCM stream from one
+rate to another.
+
+It is fixed-point: a **Q32 phase accumulator** steps through the input by
+`in_rate / out_rate` samples per output, and each output is a **linear
+interpolation** between the two straddling input samples. No floating point, so it
+runs on the `-mgeneral-regs-only` audio path. Linear interpolation is exact at DC
+and at the sample points and is cheap; a polyphase-FIR upgrade would tighten the
+stopband without changing the interface.
+
+The converter **streams**: its phase and last-sample state carry across
+`src_process` calls, so a long stream resamples block-by-block with no seam - a
+split input produces bit-identical output to the unsplit call. `src_out_capacity`
+reports a safe output-buffer size for a given input length.
+
+Covered by `make test-arm-src`.
