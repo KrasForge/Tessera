@@ -119,16 +119,23 @@ int tessera_param_queue_read(tessera_param_queue_t *q, uint32_t *id, float *valu
 #define TESSERA_EVENT_QUEUE_VA    (0x8000000000ull + 0x0F000000ull)
 #define TESSERA_EVENT_QUEUE_MAGIC 0x51565145u   /* 'EQVQ' */
 
-/* Event kinds (MIDI-shaped). */
+/* Event kinds (MIDI-shaped).  NOTE_ON/OFF/CC are v1.1; the per-note expression
+ * kinds (v1.2, issue #171) carry MPE / MIDI-2.0 style per-note pitch, pressure,
+ * and timbre so a synth can voice each note independently. */
 #define TESSERA_EV_NOTE_ON  1u
 #define TESSERA_EV_NOTE_OFF 2u
 #define TESSERA_EV_CC       3u
+#define TESSERA_EV_PITCH    4u   /* per-note pitch bend: value = bend, -8192..+8191 */
+#define TESSERA_EV_PRESSURE 5u   /* per-note pressure:   data2 = 0..127             */
+#define TESSERA_EV_TIMBRE   6u   /* per-note timbre (CC74): data2 = 0..127          */
 
 typedef struct {
-    uint8_t type;      /* TESSERA_EV_*                      */
-    uint8_t channel;   /* 0..15                             */
-    uint8_t data1;     /* note number / CC number           */
-    uint8_t data2;     /* velocity / CC value               */
+    uint8_t  type;     /* TESSERA_EV_*                                  */
+    uint8_t  channel;  /* 0..15                                         */
+    uint8_t  data1;    /* note number / CC number                       */
+    uint8_t  data2;    /* velocity / CC value / pressure / timbre       */
+    int16_t  value;    /* high-res expression (pitch bend); 0 otherwise */
+    uint16_t _pad;     /* reserved, keeps the struct 8-byte sized       */
 } tessera_note_event_t;
 
 /* Transport snapshot for the current block. */
@@ -397,6 +404,8 @@ typedef struct {
     int      active;   /* 1 while sounding (through release)  */
     int      note;     /* MIDI note, or -1 when free          */
     float    gain;     /* velocity / 127                      */
+    float    bend_semi;/* per-note pitch bend, semitones (MPE, #171) */
+    float    pressure; /* per-note pressure, 0..1 (default 1) */
     uint32_t born;     /* allocation order, for voice stealing*/
 } tessera_voice_t;
 
@@ -407,6 +416,7 @@ typedef struct {
     tessera_wave_t waveform;
     float    a_ms, d_ms, sustain, r_ms;   /* current patch envelope   */
     float    fm_ratio, fm_index;           /* TESSERA_WAVE_FM settings */
+    float    bend_range;                    /* MPE bend range, semitones (default 48) */
     uint32_t age;                          /* monotonic alloc counter  */
 } tessera_synth_t;
 
@@ -423,6 +433,24 @@ void  tessera_synth_set (tessera_synth_t *s, tessera_wave_t waveform,
 /* Set the FM modulator ratio (modulator freq / note freq) and index (modulation
  * depth) used by TESSERA_WAVE_FM voices. */
 void  tessera_synth_set_fm(tessera_synth_t *s, float ratio, float index);
+/* Set the per-note pitch-bend range in semitones for MPE PITCH events
+ * (default 48, the MPE convention). */
+void  tessera_synth_set_bend_range(tessera_synth_t *s, float semitones);
+
+/* ---- MPE / per-note expression decoder (Theme M17, issue #171) ------------ *
+ * Turns a raw MIDI channel-message stream into per-note expression events for
+ * the synth.  Under MPE each sounding note gets its own channel, so the
+ * channel's pitch bend, channel pressure, and CC 74 (timbre) apply to *that*
+ * note; the decoder tracks the active note per channel and tags the events with
+ * it.  Feed it one channel message at a time; it emits 0+ tessera events. */
+typedef struct {
+    int8_t active_note[16];   /* MIDI note sounding on each channel, or -1 */
+} tessera_mpe_t;
+void tessera_mpe_init(tessera_mpe_t *m);
+/* Decode one MIDI channel message (`status`, `d1`, `d2`) into up to `max`
+ * tessera note events written to `out`.  Returns the number produced. */
+int  tessera_mpe_feed(tessera_mpe_t *m, uint8_t status, uint8_t d1, uint8_t d2,
+                      tessera_note_event_t *out, int max);
 /* Note on (velocity 0 is treated as note-off); allocates a free voice or steals
  * the quietest.  Note off releases every voice sounding that note. */
 void  tessera_synth_note_on (tessera_synth_t *s, int note, int velocity);
