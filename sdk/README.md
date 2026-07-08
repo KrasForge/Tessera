@@ -59,6 +59,10 @@ DSP by hand (still allocation-free and libc-free):
 - **`tessera_fx_chorus_*`** - an LFO-modulated delay.
 - **`tessera_fx_gate_*`** - a noise gate with a smoothed open/close.
 - **`tessera_fx_reverb_*`** - a Schroeder reverb (4 damped combs into 2 allpasses).
+- **`tessera_fx_reverb2_*`** - the product-grade FDN reverb (issue #191): 8
+  delay lines through a lossless Hadamard matrix, exact RT60 decay control,
+  per-line damping, optional slow delay modulation for a smooth, non-metallic
+  tail. Unit-tested by `make test-arm-fdn` (measured RT60 tracks the setting).
 - **`tessera_fx_tuner_*`** / **`tessera_fx_note_of`** - a zero-crossing pitch
   estimator with a Hz -> nearest-note/cents mapping.
 

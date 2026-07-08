@@ -690,6 +690,9 @@ jobs:
       - name: Synth voice architecture host unit tests (filter env/tracking/unison/glide, ASan + UBSan)
         run: make test-arm-voice
 
+      - name: FDN reverb host unit tests (density/RT60 tracking/damping/stability, ASan + UBSan)
+        run: make test-arm-fdn
+
       - name: SDK wavetable/FM oscillator host unit tests (pitch/anti-alias/sidebands, ASan + UBSan)
         run: make test-arm-wtfm
 
