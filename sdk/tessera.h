@@ -463,6 +463,37 @@ void  tessera_fx_reverb_init(tessera_fx_reverb_t *r,
                              float feedback, float damp, float mix);
 float tessera_fx_reverb(tessera_fx_reverb_t *r, float x);
 
+/* FDN reverb (Theme M20, issue #191): an 8-line feedback delay network with a
+ * lossless Hadamard mixing matrix - the product-grade upgrade over the
+ * Schroeder topology above (denser, smoother, less metallic tail).  Controls:
+ * decay time (rt60 seconds - exact: every path loses 60 dB in rt60 regardless
+ * of its length), size (0.25..1, scales the line lengths within the caller's
+ * buffers), damping (highs die faster, like air), and wet/dry mix.  Optional
+ * slow per-line delay modulation (tessera_fx_reverb2_mod) detunes the
+ * residual modes.  Stability is structural: the matrix is orthogonal and
+ * every line gain < 1 for any rt60, so the loop is a contraction across the
+ * full control range.  Caller-owned line buffers; mutually-prime lengths
+ * (e.g. around 1000..2000 samples at 48 kHz) recommended. */
+#define TESSERA_FDN_LINES 8
+typedef struct {
+    tessera_delay_t line[TESSERA_FDN_LINES];
+    float lp[TESSERA_FDN_LINES];      /* damping filter state       */
+    float g[TESSERA_FDN_LINES];       /* per-line rt60 decay gains  */
+    float dlen[TESSERA_FDN_LINES];    /* effective line lengths     */
+    float sr, rt60, size, damp, mix;
+    float mod_rate, mod_depth, mod_phase;
+} tessera_fx_reverb2_t;
+
+void  tessera_fx_reverb2_init(tessera_fx_reverb2_t *r, float sr,
+                              float *bufs[TESSERA_FDN_LINES],
+                              const uint32_t sizes[TESSERA_FDN_LINES],
+                              float rt60_s, float size, float damp, float mix);
+void  tessera_fx_reverb2_set (tessera_fx_reverb2_t *r, float rt60_s, float size,
+                              float damp, float mix);
+void  tessera_fx_reverb2_mod (tessera_fx_reverb2_t *r, float rate_hz,
+                              float depth_samples);
+float tessera_fx_reverb2(tessera_fx_reverb2_t *r, float x);
+
 /* ---- polyphonic synth voice engine (libtessera.a, Theme B, issue #113) --- *
  * The ABI (v1.1) delivers note events into a plugin; this turns them into audio
  * - a voice allocator over the SDK's oscillators and ADSR that proves the
