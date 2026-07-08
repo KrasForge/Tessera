@@ -953,6 +953,17 @@ test-arm-spectrum: | $(ARM_BUILD_DIR)
 	      -Isdk -I$(ARCH_ARM_DIR) $(ARM_SPECTRUM_TEST_SRCS) -o $(ARM_BUILD_DIR)/spectrum_test -lm
 	$(ARM_BUILD_DIR)/spectrum_test
 
+# Host unit tests for the modulation matrix (Theme M19, issue #188): a real
+# control-rate LFO sweeps its destination between the expected bounds, multiple
+# sources sum with independent depths and clamp, depth-0/removed routes leave
+# the base, curves shape the source.  ASan/UBSan.
+ARM_MOD_TEST_SRCS = tests/arm64/modmatrix_test.c sdk/lib/tessera_mod.c \
+                    sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c
+test-arm-modmatrix: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk $(ARM_MOD_TEST_SRCS) -o $(ARM_BUILD_DIR)/modmatrix_test -lm
+	$(ARM_BUILD_DIR)/modmatrix_test
+
 # Host unit tests for the wavetable + FM oscillators (Theme M15, #164).  -lm is
 # used only for the Goertzel spectral probe; the oscillators use no libm.
 ARM_WTFM_TEST_SRCS = tests/arm64/wtfm_test.c sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c
