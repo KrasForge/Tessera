@@ -672,6 +672,9 @@ jobs:
       - name: SDK DSP building-block host unit tests (biquad/osc/delay/env/adsr, ASan + UBSan)
         run: make test-arm-dsp
 
+      - name: SDK FFT primitive host unit tests (DFT reference + real pair + windows, ASan + UBSan)
+        run: make test-arm-fft
+
       - name: SDK wavetable/FM oscillator host unit tests (pitch/anti-alias/sidebands, ASan + UBSan)
         run: make test-arm-wtfm
 

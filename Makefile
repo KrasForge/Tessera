@@ -901,6 +901,25 @@ test-arm-dsp: | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_DSP_TEST_SRCS) -o $(ARM_BUILD_DIR)/dsp_test -lm
 	$(ARM_BUILD_DIR)/dsp_test
 
+# Host unit tests for the SDK FFT primitive (Theme M18, issue #184): forward
+# vs a naive DFT reference, inverse round-trips, packed real pair vs the full
+# complex transform, tone/two-tone bin placement, window OLA identities.  The
+# reference (-lm) is used only by the test; the SDK object itself must be
+# freestanding with no external references, which is checked explicitly.
+ARM_FFT_TEST_SRCS = tests/arm64/fft_test.c sdk/lib/tessera_fft.c
+test-arm-fft: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk $(ARM_FFT_TEST_SRCS) -o $(ARM_BUILD_DIR)/fft_test -lm
+	$(ARM_BUILD_DIR)/fft_test
+	@$(CC) -std=c11 -Wall -Wextra -O2 -ffreestanding -fno-builtin \
+	      -Isdk -c sdk/lib/tessera_fft.c -o $(ARM_BUILD_DIR)/fft_freestanding.o
+	@if nm -u $(ARM_BUILD_DIR)/fft_freestanding.o | grep -q .; then \
+	  echo "ERROR: tessera_fft.c references external symbols:"; \
+	  nm -u $(ARM_BUILD_DIR)/fft_freestanding.o; exit 1; \
+	else \
+	  echo "tessera_fft.c: freestanding, no libm/libc references"; \
+	fi
+
 # Host unit tests for the wavetable + FM oscillators (Theme M15, #164).  -lm is
 # used only for the Goertzel spectral probe; the oscillators use no libm.
 ARM_WTFM_TEST_SRCS = tests/arm64/wtfm_test.c sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c

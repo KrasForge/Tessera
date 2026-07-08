@@ -553,6 +553,39 @@ void  tessera_fx_tuner_process(tessera_fx_tuner_t *t, const float *x, uint32_t n
 float tessera_fx_tuner_hz     (const tessera_fx_tuner_t *t);
 int   tessera_fx_note_of      (float hz, float *cents);
 
+/* ---- FFT primitive (libtessera.a, Theme M18, issue #184) ------------------ *
+ * Radix-2 complex FFT/inverse, in place, power-of-two sizes, plus the packed
+ * real pair (audio is real) and the STFT window helpers.  Allocation-free: the
+ * caller owns the twiddle table and every buffer.  Twiddles are generated once
+ * at setup (off the audio path); the transforms do bounded per-call work.  No
+ * libc, no libm. */
+
+typedef struct { float re, im; } tessera_cpx_t;
+
+/* Fill tw[0 .. n/2-1] with e^{-i 2 pi k / n}.  One table serves tessera_fft/
+ * tessera_ifft at size n AND tessera_rfft/tessera_irfft over n real samples. */
+void tessera_fft_twiddles(tessera_cpx_t *tw, uint32_t n);
+
+/* In-place complex transforms of n points (n a power of two >= 2).  The
+ * inverse includes the 1/n scale, so ifft(fft(x)) == x. */
+void tessera_fft (tessera_cpx_t *x, const tessera_cpx_t *tw, uint32_t n);
+void tessera_ifft(tessera_cpx_t *x, const tessera_cpx_t *tw, uint32_t n);
+
+/* Real transforms of n samples (n a power of two >= 4), via one n/2-point
+ * complex FFT.  tessera_rfft writes bins out[0 .. n/2] (DC..Nyquist; both have
+ * zero imaginary part), so `out` must hold n/2+1 entries.  tessera_irfft is
+ * its inverse (writes n samples to `out`) and uses `in` as scratch - the bins
+ * are destroyed. */
+void tessera_rfft (const float *in, tessera_cpx_t *out,
+                   const tessera_cpx_t *tw, uint32_t n);
+void tessera_irfft(tessera_cpx_t *in, float *out,
+                   const tessera_cpx_t *tw, uint32_t n);
+
+/* Periodic (DFT-even) windows for STFT analysis: Hann sums to unity at 50%
+ * overlap (and Hann^2 at 75%), which is what overlap-add resynthesis needs. */
+void tessera_window_hann   (float *w, uint32_t n);
+void tessera_window_hamming(float *w, uint32_t n);
+
 #ifdef __cplusplus
 }
 #endif
