@@ -355,3 +355,32 @@ float tessera_adsr(tessera_adsr_t *e)
     }
     return e->level;
 }
+
+/* ---- state-variable filter (issue #189) ----------------------------------- */
+
+void tessera_svf_init(tessera_svf_t *f)
+{
+    f->low = f->band = 0.0f;
+    f->f = 0.5f;
+    f->damp = 1.0f;
+}
+
+void tessera_svf_set(tessera_svf_t *f, float sr, float cutoff, float res)
+{
+    /* Chamberlin tuning: f = 2 sin(pi fc / sr), stable for fc < ~sr/6. */
+    float lim = sr / 6.0f;
+    cutoff = tessera_clampf(cutoff, 10.0f, lim);
+    f->f = 2.0f * tessera_sinf((float)TESSERA_PI * cutoff / sr);
+    /* damp = 1/Q; res in [0,1) maps to Q in [0.5, ~10]. */
+    res = tessera_clampf(res, 0.0f, 0.95f);
+    f->damp = 2.0f * (1.0f - res);
+    if (f->damp > 2.0f) f->damp = 2.0f;
+}
+
+float tessera_svf_low(tessera_svf_t *f, float x)
+{
+    f->low += f->f * f->band;
+    float high = x - f->low - f->damp * f->band;
+    f->band += f->f * high;
+    return f->low;
+}

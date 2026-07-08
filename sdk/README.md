@@ -86,8 +86,15 @@ Unit-tested by `make test-arm-conv`.
   per note, steals the quietest under over-subscription, and reclaims a voice
   when its release finishes. `tessera_note_to_hz` maps a MIDI note to its
   frequency. Polyphony is set by the caller-supplied voice array.
+- **Voice architecture** (issue #189, all off by default): a per-voice
+  state-variable filter (`tessera_synth_set_filter`) with its own envelope and
+  key tracking; unison (`tessera_synth_set_unison` — N detuned copies mixed at
+  1/√N); MONO/LEGATO modes with glide (`tessera_synth_set_mode`); and per-block
+  modulation inputs from the mod matrix (`tessera_synth_mod` — pitch, cutoff,
+  amp). The underlying `tessera_svf_*` Chamberlin filter is exposed as a DSP
+  building block (cheap to sweep per sample).
 
-Unit-tested by `make test-arm-synth`.
+Unit-tested by `make test-arm-synth` and `make test-arm-voice`.
 
 ### FFT primitive
 

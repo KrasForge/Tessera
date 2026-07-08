@@ -687,6 +687,9 @@ jobs:
       - name: Modulation matrix host unit tests (LFO sweep + sum/clamp + curves, ASan + UBSan)
         run: make test-arm-modmatrix
 
+      - name: Synth voice architecture host unit tests (filter env/tracking/unison/glide, ASan + UBSan)
+        run: make test-arm-voice
+
       - name: SDK wavetable/FM oscillator host unit tests (pitch/anti-alias/sidebands, ASan + UBSan)
         run: make test-arm-wtfm
 

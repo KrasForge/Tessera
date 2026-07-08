@@ -964,6 +964,18 @@ test-arm-modmatrix: | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_MOD_TEST_SRCS) -o $(ARM_BUILD_DIR)/modmatrix_test -lm
 	$(ARM_BUILD_DIR)/modmatrix_test
 
+# Host unit tests for the synth voice architecture (Theme M19, issue #189):
+# filter-envelope brightness (spectral centroid via the SDK rFFT), key
+# tracking, unison sideband partials (Goertzel), continuous glide, MONO vs
+# LEGATO retriggering, and mod-matrix-driven pitch/amp.  ASan/UBSan.
+ARM_VOICE_TEST_SRCS = tests/arm64/voice_test.c sdk/lib/tessera_synth.c \
+                      sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c \
+                      sdk/lib/tessera_mod.c sdk/lib/tessera_fft.c
+test-arm-voice: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk $(ARM_VOICE_TEST_SRCS) -o $(ARM_BUILD_DIR)/voice_test -lm
+	$(ARM_BUILD_DIR)/voice_test
+
 # Host unit tests for the wavetable + FM oscillators (Theme M15, #164).  -lm is
 # used only for the Goertzel spectral probe; the oscillators use no libm.
 ARM_WTFM_TEST_SRCS = tests/arm64/wtfm_test.c sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c

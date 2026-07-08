@@ -368,6 +368,15 @@ typedef enum {
     TESSERA_ADSR_SUSTAIN, TESSERA_ADSR_RELEASE
 } tessera_adsr_stage_t;
 typedef struct { float a_rate, d_rate, r_rate, sustain, level; int stage; } tessera_adsr_t;
+/* Chamberlin state-variable filter (issue #189): cheap to retune per sample
+ * (one fast sine per cutoff change), which is what a swept synth filter needs
+ * - a biquad would want a full coefficient redesign per modulation step.
+ * Stable for cutoff up to ~sr/6 (tessera_svf_set clamps).  res in [0, 1). */
+typedef struct { float low, band, f, damp; } tessera_svf_t;
+void  tessera_svf_init(tessera_svf_t *f);
+void  tessera_svf_set (tessera_svf_t *f, float sr, float cutoff, float res);
+float tessera_svf_low (tessera_svf_t *f, float x);   /* low-pass output */
+
 void  tessera_adsr_init(tessera_adsr_t *e, float sr, float a_ms, float d_ms,
                         float sustain, float r_ms);
 void  tessera_adsr_gate(tessera_adsr_t *e, int on);   /* on = note-on, off = note-off */
@@ -465,15 +474,31 @@ typedef enum {
     TESSERA_WAVE_FM     /* two-operator FM (ratio/index set by tessera_synth_set_fm) */
 } tessera_wave_t;
 
+/* Unison copies per voice (issue #189). */
+#define TESSERA_UNI_MAX 5
+
+/* Note-priority / articulation modes (issue #189). */
+#define TESSERA_SYNTH_POLY   0   /* voice per note (the default)              */
+#define TESSERA_SYNTH_MONO   1   /* one voice, retriggered, glide between     */
+#define TESSERA_SYNTH_LEGATO 2   /* one voice; overlapping notes do not       */
+                                 /* retrigger the envelopes, only glide       */
+
 typedef struct {
     tessera_osc_t   osc;
+    tessera_osc_t   uosc[TESSERA_UNI_MAX];  /* unison copies (uni_n > 1, #189) */
     tessera_fm_op_t fm_car, fm_mod;   /* carrier + modulator for TESSERA_WAVE_FM */
     tessera_adsr_t  adsr;
+    tessera_adsr_t  fadsr;    /* filter envelope (issue #189)        */
+    tessera_svf_t   svf;      /* per-voice filter (issue #189)       */
     int      active;   /* 1 while sounding (through release)  */
     int      note;     /* MIDI note, or -1 when free          */
     float    gain;     /* velocity / 127                      */
     float    bend_semi;/* per-note pitch bend, semitones (MPE, #171) */
     float    pressure; /* per-note pressure, 0..1 (default 1) */
+    float    pitch_semi;  /* current sounding pitch (glide position, #189) */
+    float    target_semi; /* glide target                                  */
+    float    glide_step;  /* per-sample glide increment (0 = not gliding)  */
+    float    note_hz;     /* current oscillator frequency (key tracking)   */
     uint32_t born;     /* allocation order, for voice stealing*/
 } tessera_voice_t;
 
@@ -486,6 +511,19 @@ typedef struct {
     float    fm_ratio, fm_index;           /* TESSERA_WAVE_FM settings */
     float    bend_range;                    /* MPE bend range, semitones (default 48) */
     uint32_t age;                          /* monotonic alloc counter  */
+
+    /* Voice architecture (issue #189); defaults preserve #113 behaviour. */
+    int      flt_on;                       /* per-voice filter enabled  */
+    float    flt_cutoff, flt_res;          /* base cutoff Hz, res 0..1  */
+    float    flt_env;                      /* Hz added at filter-env peak (signed) */
+    float    flt_track;                    /* 0..1 key tracking (cutoff follows note) */
+    float    fa_ms, fd_ms, fsustain, fr_ms;/* filter envelope           */
+    int      uni_n;                        /* unison copies (1 = off)   */
+    float    uni_detune;                   /* full unison width, cents  */
+    float    uni_gain;                     /* 1/sqrt(uni_n), precomputed */
+    int      mode;                         /* TESSERA_SYNTH_POLY/MONO/LEGATO */
+    float    glide_ms;                     /* portamento time (mono/legato) */
+    float    pitch_mod, cutoff_mod, amp_mod; /* per-block mod-matrix inputs */
 } tessera_synth_t;
 
 /* MIDI note -> frequency in Hz (equal temperament, A4 = note 69 = 440 Hz). */
@@ -504,6 +542,31 @@ void  tessera_synth_set_fm(tessera_synth_t *s, float ratio, float index);
 /* Set the per-note pitch-bend range in semitones for MPE PITCH events
  * (default 48, the MPE convention). */
 void  tessera_synth_set_bend_range(tessera_synth_t *s, float semitones);
+
+/* ---- voice architecture (Theme M19, issue #189) --------------------------- *
+ * Everything below defaults OFF, so a #113-era synth behaves identically
+ * until a feature is switched on. */
+
+/* Per-voice state-variable low-pass with its own envelope and key tracking.
+ * cutoff/res are the base; `env` adds up to that many Hz at the filter
+ * envelope's peak (signed); `track` in [0,1] scales cutoff with the note
+ * (1 = cutoff doubles per octave, referenced to middle C).  on=0 bypasses. */
+void  tessera_synth_set_filter(tessera_synth_t *s, int on,
+                               float cutoff, float res, float env, float track,
+                               float a_ms, float d_ms, float sustain, float r_ms);
+/* Unison: n detuned copies per note (1..TESSERA_UNI_MAX; 1 = off), evenly
+ * spread across `detune_cents` total width, mixed at 1/sqrt(n).  Applies to
+ * the oscillator waveforms (FM voices stay single). */
+void  tessera_synth_set_unison(tessera_synth_t *s, int n, float detune_cents);
+/* Note mode and portamento: POLY (default), MONO (one voice, retriggered),
+ * LEGATO (one voice; an overlapping note glides without retriggering the
+ * envelopes).  glide_ms is the pitch ramp time between mono/legato notes. */
+void  tessera_synth_set_mode(tessera_synth_t *s, int mode, float glide_ms);
+/* Per-block modulation inputs, meant to be fed from the modulation matrix
+ * (#188): pitch offset in semitones, cutoff offset in Hz, amp scale (0..).
+ * Applied to every voice until the next call.  Defaults 0, 0, 1. */
+void  tessera_synth_mod(tessera_synth_t *s, float pitch_semi, float cutoff_hz,
+                        float amp);
 
 /* ---- MPE / per-note expression decoder (Theme M17, issue #171) ------------ *
  * Turns a raw MIDI channel-message stream into per-note expression events for
