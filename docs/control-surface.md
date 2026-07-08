@@ -64,7 +64,7 @@ into a fixed 21x8 character grid, which the display driver blits through its fon
 Only the pixel font and the SSD1306/SH1106 bring-up are hardware; everything about
 *what the screen shows* and *how the buttons navigate* is pure and host-tested.
 
-Three screens, driven by four buttons (up / down / select / back):
+Five screens, driven by four buttons (up / down / select / back):
 
 - **Home** - the title, live **CPU** and **headroom** bar meters (fed per-mille
   from the profiler, issue #129, and drawn with `oled_ui_bar` as `[####----]`),
@@ -74,12 +74,22 @@ Three screens, driven by four buttons (up / down / select / back):
   opens its parameters, back returns home.
 - **Params** - a scrolling list of the loaded patch's parameters with their
   values, right-aligned; back returns to the patch list.
+- **Spectrum** (issue #187) - live audio spectrum: one `#` column per
+  log-frequency bar with a `-` dash marking the held peak.  Down from home
+  enters it; the values come per-mille from the SDK analyser
+  (`tessera_spectrum_*`) via `oled_ui_set_spectrum`, so the model stays
+  integer-only.
+- **Tuner** (issue #187) - note name (`A4`), a 21-column cents needle (`|`
+  centre, `*` current offset), the cents value, and the frequency in tenths of
+  a Hz.  Up from home (or down from the spectrum) enters it; fed by the SDK
+  FFT tuner (`tessera_ftuner_*` + `tessera_fx_note_of`) via
+  `oled_ui_set_tuner`.  Shows `-listen-` when no tone stands above the noise.
 
 `oled_ui_render` fills the grid with space-padded ASCII (the selected row is
 marked with `>` and may additionally be inverted by the driver). Integer-only, no
 allocation - it can run wherever the display task lives.
 
-Covered by `make test-arm-oled-ui`.
+Covered by `make test-arm-oled-ui` and `make test-arm-spectrum`.
 
 ## Program change and patch banks (issue #122)
 

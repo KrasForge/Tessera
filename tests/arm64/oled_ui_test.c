@@ -67,7 +67,12 @@ static void test_navigation(void)
     const char *patches[] = { "Clean", "Crunch", "Lead", "Ambient" };
     oled_ui_set_patches(&ui, patches, 4);
 
-    CHECK(oled_ui_input(&ui, OLED_BTN_DOWN) == OLED_SCREEN_HOME, "home ignores up/down");
+    /* Since issue #187, up/down from home cycle the analysis views
+     * (spectrum / tuner); back returns.  The patch flow is unchanged. */
+    CHECK(oled_ui_input(&ui, OLED_BTN_DOWN) == OLED_SCREEN_SPECTRUM,
+          "home + down enters the spectrum view (issue #187)");
+    CHECK(oled_ui_input(&ui, OLED_BTN_BACK) == OLED_SCREEN_HOME,
+          "back returns home from the spectrum view");
     CHECK(oled_ui_input(&ui, OLED_BTN_SELECT) == OLED_SCREEN_PATCH, "select enters patch list");
 
     char grid[OLED_ROWS * OLED_COLS];

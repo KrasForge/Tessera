@@ -126,6 +126,18 @@ Unit-tested by `make test-arm-pconv` (vs the direct engine and brute force).
 
 Unit-tested by `make test-arm-vocoder` (Goertzel probes: a +12 st shift moves
 440 Hz to 880 Hz with >80% of the power in the tone).
+
+### Spectrum analyser + FFT tuner
+
+- **`tessera_spectrum_*`** - windowed rFFT magnitude binned into log-frequency
+  bars (0..1000 per-mille of −60..0 dBFS) with per-bar peak-hold and decay —
+  exactly the integers the OLED spectrum screen renders.
+- **`tessera_ftuner_*`** - an FFT tuner: strongest-peak detection (parabolic
+  interpolation for the first estimate) refined by the bin's phase advance
+  across a hop, resolving well under a cent; robust under broadband noise that
+  derails the zero-crossing tuner. Pair with `tessera_fx_note_of`.
+
+Unit-tested by `make test-arm-spectrum` (440 Hz within 0.1 cent under noise).
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |

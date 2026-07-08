@@ -48,6 +48,52 @@ float tessera_exp2f(float x)
     return p * v.f;
 }
 
+/* sqrt(x): exponent-halving bit trick for the seed, then two Newton steps
+ * (relative error ~1e-6).  Shared by the vocoder and spectral analysis. */
+float tessera_sqrtf(float x)
+{
+    if (x <= 0.0f)
+        return 0.0f;
+    union { float f; uint32_t u; } v = { .f = x };
+    v.u = (v.u >> 1) + 0x1fbd1df5u;
+    float y = v.f;
+    y = 0.5f * (y + x / y);
+    y = 0.5f * (y + x / y);
+    return y;
+}
+
+/* atan on [0,1] - odd polynomial, |err| < 1e-4 rad. */
+static float atan01(float z)
+{
+    float z2 = z * z;
+    return z * (0.99997726f +
+           z2 * (-0.33262347f +
+           z2 * ( 0.19354346f +
+           z2 * (-0.11643287f +
+           z2 * ( 0.05265332f +
+           z2 * (-0.01172120f))))));
+}
+
+float tessera_atan2f(float y, float x)
+{
+    float ay = y < 0.0f ? -y : y;
+    float ax = x < 0.0f ? -x : x;
+    if (ax == 0.0f && ay == 0.0f)
+        return 0.0f;
+    float a = ax >= ay ? atan01(ay / ax)
+                       : (float)(TESSERA_PI / 2.0) - atan01(ax / ay);
+    if (x < 0.0f) a = (float)TESSERA_PI - a;
+    return y < 0.0f ? -a : a;
+}
+
+/* Wrap an angle to (-pi, pi]. */
+float tessera_wrap_pi(float p)
+{
+    float k  = p * (1.0f / (float)TESSERA_TAU);
+    int   ki = (int)(k + (k >= 0.0f ? 0.5f : -0.5f));
+    return p - (float)ki * (float)TESSERA_TAU;
+}
+
 /* log2(x) for x > 0: exponent from the float bits, then a fast atanh-series on
  * the mantissa in [1,2) (error < 1e-5). */
 float tessera_log2f(float x)

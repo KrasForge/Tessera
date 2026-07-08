@@ -26,7 +26,11 @@ typedef enum {
     OLED_SCREEN_HOME = 0,   /* title + CPU/headroom meters + current patch */
     OLED_SCREEN_PATCH,      /* scrollable patch list                       */
     OLED_SCREEN_PARAM,      /* scrollable parameter list for the patch     */
+    OLED_SCREEN_SPECTRUM,   /* live spectrum bars + peak-hold (issue #187) */
+    OLED_SCREEN_TUNER,      /* note name + cents needle + Hz (issue #187)  */
 } oled_screen_t;
+
+#define OLED_MAX_BARS  (OLED_COLS - 1)   /* spectrum bars: one column each */
 
 typedef enum {
     OLED_BTN_UP = 0,
@@ -51,6 +55,18 @@ typedef struct {
     int           cur_patch;          /* loaded patch index, or -1 */
     uint32_t      cpu_permille;       /* 0..1000 total CPU load    */
     uint32_t      headroom_permille;  /* 0..1000 headroom          */
+
+    /* Spectrum screen state (issue #187): per-mille bar levels + held peaks,
+     * produced by the SDK analyser and pushed by the host each update. */
+    uint32_t      bars[OLED_MAX_BARS];
+    uint32_t      bar_peaks[OLED_MAX_BARS];
+    int           n_bars;
+
+    /* Tuner screen state (issue #187): MIDI note (-1 = no signal), cents
+     * offset (-50..+50), and frequency in tenths of Hz (integer-only). */
+    int           tuner_note;
+    int           tuner_cents;
+    uint32_t      tuner_dhz;
 } oled_ui_t;
 
 void oled_ui_init(oled_ui_t *ui);
@@ -65,6 +81,15 @@ void oled_ui_set_params(oled_ui_t *ui, const char *const *names,
 /* Update the live meters (per-mille, 0..1000). */
 void oled_ui_set_meters(oled_ui_t *ui, uint32_t cpu_permille,
                         uint32_t headroom_permille);
+
+/* Update the spectrum screen: `bars`/`peaks` are per-mille levels (0..1000),
+ * up to OLED_MAX_BARS of them (the SDK analyser's bars/peaks arrays). */
+void oled_ui_set_spectrum(oled_ui_t *ui, const uint32_t *bars,
+                          const uint32_t *peaks, int n);
+
+/* Update the tuner screen: MIDI `note` (-1 = no signal), `cents` (-50..+50),
+ * and the frequency in tenths of Hz (4401 = 440.1 Hz). */
+void oled_ui_set_tuner(oled_ui_t *ui, int note, int cents, uint32_t dhz);
 
 /* Feed a button press; advances the state machine.  Returns the (possibly new)
  * current screen. */
