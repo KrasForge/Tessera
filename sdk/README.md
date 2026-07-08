@@ -100,6 +100,18 @@ Unit-tested by `make test-arm-synth`.
   for partitioned convolution, spectral effects, and spectrum/tuner analysis.
 
 Unit-tested by `make test-arm-fft` (against a naive DFT reference).
+
+### Partitioned FFT convolution (long IRs)
+
+- **`tessera_pconv_*`** - uniform-partitioned overlap-save convolution: the IR is
+  split into block-sized partitions transformed once at load, and each block
+  costs one forward FFT, P bin-wise complex MACs, and one inverse FFT — bounded,
+  position-independent work instead of `O(block × ir_len)`. Zero added latency
+  and the *same filter* as `tessera_conv_*` (use the direct engine for short
+  IRs, this for cabinets and rooms). The caller owns the spectra, the
+  input-spectrum delay line, and the work frames.
+
+Unit-tested by `make test-arm-pconv` (vs the direct engine and brute force).
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |
