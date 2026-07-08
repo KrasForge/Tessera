@@ -1171,6 +1171,17 @@ test-arm-src: | $(ARM_BUILD_DIR)
 	      -I$(ARCH_ARM_DIR) $(ARM_SRC_TEST_SRCS) -o $(ARM_BUILD_DIR)/src_test
 	$(ARM_BUILD_DIR)/src_test
 
+# Host unit tests for the polyphase-FIR SRC (Theme M20, issue #192), head to
+# head with the linear SRC: flat passband where linear droops, images/aliases
+# suppressed by 40+ dB, exact DC, matching output counts, seam-free chunked
+# streaming (bit-identical).  -lm is used only for the DFT probes.
+ARM_SRCFIR_TEST_SRCS = tests/arm64/src_fir_test.c $(ARCH_ARM_DIR)/src_fir.c \
+                       $(ARCH_ARM_DIR)/src.c
+test-arm-src-fir: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -I$(ARCH_ARM_DIR) $(ARM_SRCFIR_TEST_SRCS) -o $(ARM_BUILD_DIR)/src_fir_test -lm
+	$(ARM_BUILD_DIR)/src_fir_test
+
 # Host unit tests for multi-channel audio I/O (Theme H, #132): interleave /
 # de-interleave and the device<->graph channel routing matrix.
 ARM_MULTIIO_TEST_SRCS = tests/arm64/multiio_test.c $(ARCH_ARM_DIR)/multiio.c
