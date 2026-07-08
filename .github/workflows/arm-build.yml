@@ -678,6 +678,9 @@ jobs:
       - name: Partitioned FFT convolution host unit tests (vs direct engine + brute force, ASan + UBSan)
         run: make test-arm-pconv
 
+      - name: Phase vocoder host unit tests (unity/stretch/pitch-shift via Goertzel, ASan + UBSan)
+        run: make test-arm-vocoder
+
       - name: SDK wavetable/FM oscillator host unit tests (pitch/anti-alias/sidebands, ASan + UBSan)
         run: make test-arm-wtfm
 
