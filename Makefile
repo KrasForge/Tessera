@@ -930,6 +930,16 @@ test-arm-pconv: | $(ARM_BUILD_DIR)
 	      -Isdk $(ARM_PCONV_TEST_SRCS) -o $(ARM_BUILD_DIR)/pconv_test -lm
 	$(ARM_BUILD_DIR)/pconv_test
 
+# Host unit tests for the phase vocoder (Theme M18, issue #186): unity
+# reproduces the input, 2x stretch preserves pitch, +/-12 st shifts move the
+# measured fundamental an octave (Goertzel), duration preserved.  ASan/UBSan.
+ARM_PVOC_TEST_SRCS = tests/arm64/vocoder_test.c sdk/lib/tessera_pvoc.c \
+                     sdk/lib/tessera_fft.c sdk/lib/tessera_math.c
+test-arm-vocoder: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	      -Isdk $(ARM_PVOC_TEST_SRCS) -o $(ARM_BUILD_DIR)/vocoder_test -lm
+	$(ARM_BUILD_DIR)/vocoder_test
+
 # Host unit tests for the wavetable + FM oscillators (Theme M15, #164).  -lm is
 # used only for the Goertzel spectral probe; the oscillators use no libm.
 ARM_WTFM_TEST_SRCS = tests/arm64/wtfm_test.c sdk/lib/tessera_dsp.c sdk/lib/tessera_math.c

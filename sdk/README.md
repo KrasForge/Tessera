@@ -112,6 +112,20 @@ Unit-tested by `make test-arm-fft` (against a naive DFT reference).
   input-spectrum delay line, and the work frames.
 
 Unit-tested by `make test-arm-pconv` (vs the direct engine and brute force).
+
+### Phase vocoder (pitch-shift / time-stretch)
+
+- **`tessera_pvoc_*`** - an STFT analysis/synthesis framework (Hann in/out at 75%
+  overlap, COLA-exact) with identity phase locking: peaks propagate by their
+  instantaneous frequency, every other bin locks to its region's peak, so grains
+  stay coherent and the classic vocoder smearing is suppressed. Hop-granular
+  streaming time-stretch; unity settings reproduce the input.
+- **`tessera_pshift_*`** - a block-size-agnostic pitch shifter on top: stretch by
+  the ratio then resample back to the original duration (`2.0` = +1 octave,
+  `ratio = 2^(semitones/12)`).
+
+Unit-tested by `make test-arm-vocoder` (Goertzel probes: a +12 st shift moves
+440 Hz to 880 Hz with >80% of the power in the tone).
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |

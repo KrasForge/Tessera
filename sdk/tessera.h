@@ -621,6 +621,52 @@ int  tessera_pconv_init(tessera_pconv_t *pc, uint32_t block,
 void tessera_pconv_process(tessera_pconv_t *pc, const float *in, float *out);
 void tessera_pconv_reset(tessera_pconv_t *pc);
 
+/* ---- phase vocoder: time-stretch and pitch-shift (Theme M18, issue #186) -- *
+ * STFT analysis/synthesis over the FFT primitive: Hann analysis + synthesis
+ * windows at 75% overlap, per-bin phase propagation by instantaneous
+ * frequency.  The synthesis hop is fixed at n/4 (COLA-exact for Hann^2); the
+ * analysis hop is round(hs / ratio), so the effective stretch is the exact
+ * rational hs/ha.  Unity ratio reproduces the input (minus the n-sample
+ * framework latency).  Allocation-free: the caller owns the twiddles (from
+ * tessera_fft_twiddles(tw, n)), a float arena of tessera_pvoc_floats(n)
+ * entries, and a bin arena of tessera_pvoc_cpx(n) entries.  No libm.
+ *
+ * tessera_pvoc_process is hop-granular: it consumes exactly pv.ha input
+ * samples and produces exactly pv.hs output samples, time-stretched. */
+typedef struct {
+    uint32_t n, ha, hs, primed;
+    const tessera_cpx_t *tw;
+    float *win, *in_ring, *ola, *frame;
+    float *prev_phase, *synth_phase, *aphase, *peaks;
+    tessera_cpx_t *spec;
+} tessera_pvoc_t;
+
+uint32_t tessera_pvoc_floats(uint32_t n);
+uint32_t tessera_pvoc_cpx(uint32_t n);
+int  tessera_pvoc_init(tessera_pvoc_t *pv, uint32_t n, float ratio,
+                       const tessera_cpx_t *tw, float *mem, tessera_cpx_t *cmem);
+void tessera_pvoc_process(tessera_pvoc_t *pv, const float *in, float *out);
+void tessera_pvoc_reset(tessera_pvoc_t *pv);
+
+/* Pitch shifter: time-stretch by `ratio` then resample back to the original
+ * duration, scaling every frequency by `ratio` (2.0 = +1 octave, 0.5 = -1;
+ * ratio = 2^(semitones/12)).  Block-size agnostic streaming: each call
+ * consumes and produces exactly `count` samples (silence while the STFT
+ * pipeline primes).  Float arena: tessera_pshift_floats(n); bins as above. */
+typedef struct {
+    tessera_pvoc_t pv;
+    float ratio, rpos;
+    float *in_fifo, *st_fifo, *out_fifo;
+    uint32_t cap, in_n, st_n, out_n;
+} tessera_pshift_t;
+
+uint32_t tessera_pshift_floats(uint32_t n);
+int  tessera_pshift_init(tessera_pshift_t *ps, uint32_t n, float ratio,
+                         const tessera_cpx_t *tw, float *mem, tessera_cpx_t *cmem);
+void tessera_pshift_process(tessera_pshift_t *ps, const float *in, float *out,
+                            uint32_t count);
+void tessera_pshift_reset(tessera_pshift_t *ps);
+
 #ifdef __cplusplus
 }
 #endif
