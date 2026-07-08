@@ -69,8 +69,16 @@ float tessera_clampf(float x, float lo, float hi);
 float tessera_exp2f(float x);
 float tessera_log2f(float x);
 
-/* Tau (2*pi) for phase math. */
+/* Fast, libm-free sqrt (bit-trick seed + two Newton steps, ~1e-6 relative),
+ * atan2 (odd polynomial + octant fixup, < 1e-4 rad), and wrap-to-(-pi, pi].
+ * The magnitude/phase toolkit for spectral code. */
+float tessera_sqrtf(float x);
+float tessera_atan2f(float y, float x);
+float tessera_wrap_pi(float p);
+
+/* Tau (2*pi) and pi for phase math. */
 #define TESSERA_TAU 6.28318530717958647692f
+#define TESSERA_PI  3.14159265358979323846f
 
 /* ---- control input: the host parameter queue ----------------------------- */
 
@@ -666,6 +674,56 @@ int  tessera_pshift_init(tessera_pshift_t *ps, uint32_t n, float ratio,
 void tessera_pshift_process(tessera_pshift_t *ps, const float *in, float *out,
                             uint32_t count);
 void tessera_pshift_reset(tessera_pshift_t *ps);
+
+/* ---- spectrum analyser + FFT tuner (Theme M18, issue #187) ---------------- *
+ * Analysis for the display: log-frequency spectrum bars and a robust tuner.
+ * Both emit the integer values the OLED UI model renders (per-mille levels;
+ * pair the tuner with tessera_fx_note_of for note/cents), keeping the kernel
+ * side integer-only.  Caller-owned buffers, no allocation, no libm.
+ *
+ * Spectrum: feed n-sample frames; bars[i] is the bar's current level and
+ * peaks[i] its held peak (0..1000 per-mille of the -60..0 dBFS range), over
+ * `nbars` log-spaced bands from ~50 Hz to Nyquist.  `decay` is the per-update
+ * peak fall, in per-mille.  Arenas: tessera_spectrum_floats(n) floats,
+ * tessera_pvoc_cpx(n) bins, tessera_spectrum_u32(nbars) uint32s. */
+typedef struct {
+    uint32_t n, nbars, decay;
+    float sr;
+    const tessera_cpx_t *tw;
+    float *win, *frame;
+    tessera_cpx_t *spec;
+    uint32_t *edges, *bars, *peaks;
+} tessera_spectrum_t;
+
+uint32_t tessera_spectrum_floats(uint32_t n);
+uint32_t tessera_spectrum_u32(uint32_t nbars);
+int  tessera_spectrum_init(tessera_spectrum_t *sp, uint32_t n, float sr,
+                           uint32_t nbars, uint32_t decay,
+                           const tessera_cpx_t *tw,
+                           float *mem, tessera_cpx_t *cmem, uint32_t *umem);
+void tessera_spectrum_process(tessera_spectrum_t *sp, const float *x);
+
+/* FFT tuner: streaming (any block size); analyses every n/4 samples.  The
+ * fundamental is the strongest spectral peak - parabolic interpolation for
+ * the first estimate, then refined by the bin's phase advance across the hop
+ * (instantaneous frequency), resolving a small fraction of a bin.  Robust
+ * under broadband noise, which spreads across bins while the tone stays
+ * concentrated.  Returns 0 Hz when no clear tone stands above the noise.
+ * Arena: tessera_ftuner_floats(n) floats + tessera_pvoc_cpx(n) bins. */
+typedef struct {
+    uint32_t n, hop, wpos, fill, primed;
+    float sr, hz;
+    const tessera_cpx_t *tw;
+    float *win, *ring, *frame, *phase;
+    tessera_cpx_t *spec;
+} tessera_ftuner_t;
+
+uint32_t tessera_ftuner_floats(uint32_t n);
+int   tessera_ftuner_init(tessera_ftuner_t *t, uint32_t n, float sr,
+                          const tessera_cpx_t *tw, float *mem, tessera_cpx_t *cmem);
+void  tessera_ftuner_process(tessera_ftuner_t *t, const float *x, uint32_t count);
+float tessera_ftuner_hz(const tessera_ftuner_t *t);
+void  tessera_ftuner_reset(tessera_ftuner_t *t);
 
 #ifdef __cplusplus
 }

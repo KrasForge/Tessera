@@ -31,56 +31,10 @@
 
 #include "tessera.h"
 
-/* ---- self-contained float helpers (no libm) ------------------------------ */
+/* Magnitude/phase math (tessera_sqrtf / tessera_atan2f / tessera_wrap_pi)
+ * comes from tessera_math.c - shared with the spectral analysis blocks. */
 
-static float pv_sqrtf(float x)
-{
-    if (x <= 0.0f)
-        return 0.0f;
-    union { float f; uint32_t u; } v = { .f = x };
-    v.u = (v.u >> 1) + 0x1fbd1df5u;               /* seed: ~sqrt via exponent */
-    float y = v.f;
-    y = 0.5f * (y + x / y);                        /* two Newton steps        */
-    y = 0.5f * (y + x / y);
-    return y;
-}
-
-/* atan on [0,1] - minimax-ish odd polynomial, |err| < 1e-4 rad. */
-static float pv_atan01(float z)
-{
-    float z2 = z * z;
-    return z * (0.99997726f +
-           z2 * (-0.33262347f +
-           z2 * ( 0.19354346f +
-           z2 * (-0.11643287f +
-           z2 * ( 0.05265332f +
-           z2 * (-0.01172120f))))));
-}
-
-#define PV_PI  3.14159265358979323846f
-#define PV_TAU 6.28318530717958647692f
-
-static float pv_atan2f(float y, float x)
-{
-    float ay = y < 0.0f ? -y : y;
-    float ax = x < 0.0f ? -x : x;
-    if (ax == 0.0f && ay == 0.0f)
-        return 0.0f;
-    /* atan of the smaller/larger ratio, then octant fixup. */
-    float a = ax >= ay ? pv_atan01(ay / ax) : PV_PI / 2.0f - pv_atan01(ax / ay);
-    if (x < 0.0f) a = PV_PI - a;
-    return y < 0.0f ? -a : a;
-}
-
-static float pv_cosf(float x) { return tessera_sinf(x + PV_PI / 2.0f); }
-
-/* Wrap an angle to (-pi, pi]. */
-static float pv_wrap(float p)
-{
-    float k = p * (1.0f / PV_TAU);
-    int   ki = (int)(k + (k >= 0.0f ? 0.5f : -0.5f));
-    return p - (float)ki * PV_TAU;
-}
+static float pv_cosf(float x) { return tessera_sinf(x + TESSERA_PI / 2.0f); }
 
 /* ---- STFT vocoder core ---------------------------------------------------- */
 
@@ -154,8 +108,8 @@ void tessera_pvoc_process(tessera_pvoc_t *pv, const float *in, float *out)
     /* Polar form: magnitudes stay in spec[].re, analysis phases in aphase. */
     for (uint32_t k = 0; k < bins; k++) {
         float re = pv->spec[k].re, im = pv->spec[k].im;
-        pv->spec[k].re = pv_sqrtf(re * re + im * im);
-        pv->aphase[k]  = pv_atan2f(im, re);
+        pv->spec[k].re = tessera_sqrtf(re * re + im * im);
+        pv->aphase[k]  = tessera_atan2f(im, re);
     }
 
     /* Phase propagation with identity phase locking (vertical coherence).
@@ -185,12 +139,12 @@ void tessera_pvoc_process(tessera_pvoc_t *pv, const float *in, float *out)
         /* Propagate each peak by its instantaneous frequency. */
         for (uint32_t p = 0; p < np; p++) {
             uint32_t k = (uint32_t)pv->peaks[p];
-            float omega = PV_TAU * (float)k / (float)n;
-            float dp = pv_wrap(pv->aphase[k] - pv->prev_phase[k]
+            float omega = TESSERA_TAU * (float)k / (float)n;
+            float dp = tessera_wrap_pi(pv->aphase[k] - pv->prev_phase[k]
                                - omega * (float)ha);
             float inst = omega + dp / (float)ha;
             pv->synth_phase[k] =
-                pv_wrap(pv->synth_phase[k] + inst * (float)hs);
+                tessera_wrap_pi(pv->synth_phase[k] + inst * (float)hs);
         }
         /* Lock every other bin to its nearest peak (regions split halfway
          * between neighbouring peaks). */
@@ -205,7 +159,7 @@ void tessera_pvoc_process(tessera_pvoc_t *pv, const float *in, float *out)
             float    phi_p = pv->aphase[k];
             for (uint32_t b = lo; b <= hi; b++) {
                 if (b == k) continue;
-                pv->synth_phase[b] = pv_wrap(psi_p + pv->aphase[b] - phi_p);
+                pv->synth_phase[b] = tessera_wrap_pi(psi_p + pv->aphase[b] - phi_p);
             }
         }
     }

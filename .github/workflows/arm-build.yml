@@ -681,6 +681,9 @@ jobs:
       - name: Phase vocoder host unit tests (unity/stretch/pitch-shift via Goertzel, ASan + UBSan)
         run: make test-arm-vocoder
 
+      - name: Spectrum analyser + FFT tuner + OLED screens host unit tests (ASan + UBSan)
+        run: make test-arm-spectrum
+
       - name: SDK wavetable/FM oscillator host unit tests (pitch/anti-alias/sidebands, ASan + UBSan)
         run: make test-arm-wtfm
 
