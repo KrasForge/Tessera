@@ -88,6 +88,18 @@ Unit-tested by `make test-arm-conv`.
   frequency. Polyphony is set by the caller-supplied voice array.
 
 Unit-tested by `make test-arm-synth`.
+
+### FFT primitive
+
+- **`tessera_fft_*`** - a radix-2 complex FFT and inverse (in place, power-of-two
+  sizes) plus the packed real pair **`tessera_rfft`/`tessera_irfft`** (audio is
+  real: n samples cost one n/2-point complex transform) and the periodic
+  **`tessera_window_hann`/`_hamming`** helpers whose overlap-add identities STFT
+  resynthesis relies on. Allocation-free: the caller owns the twiddle table
+  (`tessera_fft_twiddles`, filled once at setup) and every buffer. The enabler
+  for partitioned convolution, spectral effects, and spectrum/tuner analysis.
+
+Unit-tested by `make test-arm-fft` (against a naive DFT reference).
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |
