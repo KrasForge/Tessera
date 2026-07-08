@@ -586,6 +586,41 @@ void tessera_irfft(tessera_cpx_t *in, float *out,
 void tessera_window_hann   (float *w, uint32_t n);
 void tessera_window_hamming(float *w, uint32_t n);
 
+/* ---- partitioned FFT convolution (libtessera.a, Theme M18, issue #185) ---- *
+ * Long-IR convolution the way real products do it: the IR is split into
+ * block-sized partitions transformed once at load, and each block costs one
+ * forward FFT, P bin-wise complex MACs, and one inverse FFT - bounded,
+ * position-independent work (uniform-partitioned overlap-save with a
+ * frequency-domain delay line).  Use tessera_conv_* for short IRs; use this
+ * for cabinets and rooms.  Zero added latency: block n's output depends on
+ * input up to block n, exactly like the direct engine.
+ *
+ * The caller owns every buffer.  For block size B (power of two >= 4) and an
+ * ir_len-tap IR, with P = tessera_pconv_parts(B, ir_len) and K = B+1 bins:
+ *   tw     - B entries,      tessera_fft_twiddles(tw, 2*B)
+ *   h_spec - P*K entries     (IR partition spectra, filled by init)
+ *   x_spec - P*K entries     (input-spectrum delay line)
+ *   acc    - K entries       (per-block accumulator)
+ *   work   - 4*B floats      (persistent input frame + inverse scratch)
+ * init transforms the IR (call at load time, off the audio path) and returns
+ * 0, or -1 on a bad size/NULL.  process consumes and produces exactly B
+ * samples. */
+typedef struct {
+    uint32_t block, fft, bins, parts, slot;
+    const tessera_cpx_t *tw;
+    tessera_cpx_t *h_spec, *x_spec, *acc;
+    float *work;
+} tessera_pconv_t;
+
+uint32_t tessera_pconv_parts(uint32_t block, uint32_t ir_len);
+int  tessera_pconv_init(tessera_pconv_t *pc, uint32_t block,
+                        const float *ir, uint32_t ir_len,
+                        const tessera_cpx_t *tw,
+                        tessera_cpx_t *h_spec, tessera_cpx_t *x_spec,
+                        tessera_cpx_t *acc, float *work);
+void tessera_pconv_process(tessera_pconv_t *pc, const float *in, float *out);
+void tessera_pconv_reset(tessera_pconv_t *pc);
+
 #ifdef __cplusplus
 }
 #endif
