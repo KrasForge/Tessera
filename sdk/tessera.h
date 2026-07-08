@@ -725,6 +725,60 @@ void  tessera_ftuner_process(tessera_ftuner_t *t, const float *x, uint32_t count
 float tessera_ftuner_hz(const tessera_ftuner_t *t);
 void  tessera_ftuner_reset(tessera_ftuner_t *t);
 
+/* ---- modulation matrix (Theme M19, issue #188) ----------------------------- *
+ * Routes modulation SOURCES (LFOs, ADSRs, envelope followers, velocity /
+ * pressure / pedals - anything the caller publishes as a float per block) to
+ * parameter DESTINATIONS with per-route depth and curve:
+ *
+ *     value[d] = clamp(base[d] + sum depth_r * curve_r(src[r]), lo, hi)
+ *
+ * Control-rate (evaluate once per block), pure C over caller-owned tables, no
+ * allocation.  Unipolar sources live in [0,1], bipolar in [-1,1]; depth is
+ * signed and scales the source into destination units.  Stream the evaluated
+ * values onto the parameter queues (or into a synth) after each eval. */
+
+#define TESSERA_MOD_LIN 0u   /* pass through                                  */
+#define TESSERA_MOD_EXP 1u   /* x*|x|: gentle near zero, steep at the ends    */
+#define TESSERA_MOD_INV 2u   /* negate                                        */
+
+typedef struct {
+    uint16_t src, dst;
+    float    depth;
+    uint8_t  curve, on;
+} tessera_mod_route_t;
+
+typedef struct {
+    float base, lo, hi;   /* base value and clamp range */
+    float value;          /* result of the last eval    */
+} tessera_mod_dest_t;
+
+typedef struct {
+    tessera_mod_route_t *routes;
+    uint32_t n_routes, max_routes;
+    float *sources;
+    uint32_t n_sources;
+    tessera_mod_dest_t *dests;
+    uint32_t n_dests;
+} tessera_mod_t;
+
+void tessera_mod_init(tessera_mod_t *m,
+                      tessera_mod_route_t *routes, uint32_t max_routes,
+                      float *sources, uint32_t n_sources,
+                      tessera_mod_dest_t *dests, uint32_t n_dests);
+/* Configure destination `dst`: base value clamped into [lo, hi]. */
+void tessera_mod_dest_setup(tessera_mod_t *m, uint32_t dst,
+                            float base, float lo, float hi);
+/* Add a route; returns its handle (for unroute) or -1 if the table is full
+ * or an index is out of range.  Disabled slots are reused. */
+int  tessera_mod_route(tessera_mod_t *m, uint32_t src, uint32_t dst,
+                       float depth, uint8_t curve);
+void tessera_mod_unroute(tessera_mod_t *m, int route);
+void tessera_mod_set_source(tessera_mod_t *m, uint32_t src, float value);
+void tessera_mod_set_base(tessera_mod_t *m, uint32_t dst, float base);
+/* Evaluate every route and clamp every destination (call once per block). */
+void tessera_mod_eval(tessera_mod_t *m);
+float tessera_mod_value(const tessera_mod_t *m, uint32_t dst);
+
 #ifdef __cplusplus
 }
 #endif

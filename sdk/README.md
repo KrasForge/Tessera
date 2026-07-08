@@ -138,6 +138,18 @@ Unit-tested by `make test-arm-vocoder` (Goertzel probes: a +12 st shift moves
   derails the zero-crossing tuner. Pair with `tessera_fx_note_of`.
 
 Unit-tested by `make test-arm-spectrum` (440 Hz within 0.1 cent under noise).
+
+### Modulation matrix
+
+- **`tessera_mod_*`** - the routing fabric that turns "set a parameter" into a
+  living instrument: routes `{source, destination, depth, curve}` evaluated once
+  per block as `value = clamp(base + Σ depth·curve(src), lo, hi)`. Sources are
+  whatever the caller publishes (LFOs, ADSRs, followers, velocity/pressure/
+  pedals); depths are signed; curves are LIN / EXP (`x·|x|`) / INV. Caller-owned
+  tables, bounded work.
+
+Unit-tested by `make test-arm-modmatrix` (a real control-rate LFO sweeps its
+destination between the expected bounds).
 | `Makefile`             | Builds `libtessera.a`. |
 | `Makefile.template`    | Copy-pasteable makefile for your own plugin. |
 | `examples/sine_plugin/`| A complete, commented example plugin built with only the SDK. |

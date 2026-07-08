@@ -684,6 +684,9 @@ jobs:
       - name: Spectrum analyser + FFT tuner + OLED screens host unit tests (ASan + UBSan)
         run: make test-arm-spectrum
 
+      - name: Modulation matrix host unit tests (LFO sweep + sum/clamp + curves, ASan + UBSan)
+        run: make test-arm-modmatrix
+
       - name: SDK wavetable/FM oscillator host unit tests (pitch/anti-alias/sidebands, ASan + UBSan)
         run: make test-arm-wtfm
 
