@@ -41,8 +41,7 @@ It is fixed-point: a **Q32 phase accumulator** steps through the input by
 `in_rate / out_rate` samples per output, and each output is a **linear
 interpolation** between the two straddling input samples. No floating point, so it
 runs on the `-mgeneral-regs-only` audio path. Linear interpolation is exact at DC
-and at the sample points and is cheap; a polyphase-FIR upgrade would tighten the
-stopband without changing the interface.
+and at the sample points and is cheap.
 
 The converter **streams**: its phase and last-sample state carry across
 `src_process` calls, so a long stream resamples block-by-block with no seam - a
@@ -50,6 +49,34 @@ split input produces bit-identical output to the unsplit call. `src_out_capacity
 reports a safe output-buffer size for a given input length.
 
 Covered by `make test-arm-src`.
+
+### Polyphase-FIR upgrade (issue #192)
+
+Linear interpolation aliases on large ratios and rolls off the top octave -
+measurably: a tone at 0.8 of the input Nyquist droops **-3.7 dB** through a 2x
+upsample and its spectral image is only **12 dB** down; a 15 kHz tone
+downsampled 48 -> 24 kHz aliases to 9 kHz **unattenuated**. `arch/arm64/
+src_fir.c` is the product-grade upgrade with the same streaming interface
+shape: a **Blackman-windowed sinc prototype** (32 input samples wide) split
+into **32 polyphase sub-filters**, with the fractional position selecting two
+adjacent phases whose coefficients are linearly interpolated.
+
+- Everything is integer, generation included: the sinc/window tables are built
+  at init by a self-contained Q15 integer sine, so the module builds and runs
+  under `-mgeneral-regs-only`.  Per output: 32 exact Q30 MACs.
+- The cutoff is 0.92 of the **narrower** Nyquist, so downsampling rejects
+  would-be aliases (the anti-alias filter scales with the ratio) and
+  upsampling rejects images.
+- Every phase's taps are normalised to sum to exactly 32768 - and the phase
+  interpolation is kept unrounded in Q30 - so **DC is bit-exact**, matching
+  the linear SRC.
+
+Measured against the linear SRC on the same inputs (`make test-arm-src-fir`):
+passband **-0.13 dB** at 0.8 Nyquist (linear -3.68), image rejection
+**67.6 dB** (linear 12.3), downsampling alias at **-60.6 dBFS** (linear
+passes it through at full level), matching output counts, and bit-identical
+chunked streaming.  Use `src_t` where cheap-and-cheerful is fine; use
+`src_fir_t` where the audio is the product.
 
 ## Multi-channel I/O (issue #132)
 

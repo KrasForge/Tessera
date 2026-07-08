@@ -258,6 +258,9 @@ jobs:
       - name: Sample-rate-conversion host unit tests (DC/2x/ratios/streaming, ASan + UBSan)
         run: make test-arm-src
 
+      - name: Polyphase-FIR SRC host unit tests (passband/image/alias vs linear, ASan + UBSan)
+        run: make test-arm-src-fir
+
       - name: Multi-channel I/O host unit tests (interleave + device<->graph routing, ASan + UBSan)
         run: make test-arm-multiio
 
