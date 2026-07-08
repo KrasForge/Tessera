@@ -180,7 +180,7 @@ DAC, with measured round-trip latency published in
 
 ## Roadmaps and ideas
 
-Two longer-form planning documents expand on the milestones above; neither is a
+Three longer-form planning documents expand on the milestones above; none is a
 commitment, just a place to draw from:
 
 - [`docs/hardware-targets.md`](docs/hardware-targets.md) - the boards and SoCs
@@ -190,3 +190,7 @@ commitment, just a place to draw from:
   (never-go-silent reliability, DSP building blocks, timing, routing, control,
   the plugin ecosystem) grouped by theme, with the isolation-differentiating
   ones flagged.
+- [`docs/linux-host.md`](docs/linux-host.md) - porting the host model (the
+  plugin ABI, isolation, the syscall gate, budgets, the never-go-silent
+  semantics) to userspace Linux as a sibling deliverable: the reach, with
+  the microkernel as the reference proof it is measured against.
