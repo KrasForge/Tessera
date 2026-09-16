@@ -145,7 +145,9 @@ pthread execution tests, malformed-input/serialization tests, live-session
 concurrency tests, existing shell/patch regressions, actual four-core ELF
 capacity/fault/transport acceptance, and the serial two-boot persistence test.
 
-The capacity fixture uses 48 kHz / 240-sample (5 ms) synthetic frames. Its
+The capacity fixture uses an explicitly declared 12 kHz / 240-sample
+(20 ms) emulation profile. The identical probe runs serially for more than
+one frame, is rejected on one core and admitted on three. Its
 three timer-bound DSP probes each occupy 40% of the frame, and declare a 60%
 budget including emulated entry overhead. The same probes run longer than one
 frame serially, are rejected on one DSP core, and are accepted on three. This
@@ -154,7 +156,13 @@ benchmark or Cortex-A72 WCET measurement. The intentionally overloaded serial
 measurement has its cadence stopped; the parallel measurement starts with a
 fresh cadence rather than inheriting the benchmark's delayed IRQs.
 
-The serial application uses 48 kHz / 64-sample (750 Hz) synthetic frames.
+The interactive application defaults to 48 kHz / 64-sample (750 Hz) frames.
+The automated serial correctness/cold-boot gate builds it at 48 kHz /
+240-sample (200 Hz) frames, keeping the exact zero-missing-frame and watchdog
+assertions. `test-arm-session-console-fast` retains the strict 750 Hz
+wall-clock diagnostic. This is a separate, lower-rate functional acceptance
+profile, not a fix or a passing result for the previously failing cold-entry
+750 Hz stress runs.
 Actual wall-clock deadline/overrun counters remain observable; passing a
 finite QEMU run is not a guarantee under arbitrary host contention. Earlier
 failed runs are kept in the verification evidence. The unrelated legacy M12
@@ -165,3 +173,19 @@ memory pressure, and a recorded CM4 fault-containment demonstration remain M10
 work. The board's existing boot entry is still the bring-up/self-test image;
 `run-arm-workstation` is the runnable QEMU application, not a claim that the
 board boot has already been wired to the new session engine.
+
+
+The singleton scheduler adopts a same-PID update without copying/clearing the
+full 16-task state table. A regression verifies that two accumulated strikes,
+a third-strike kill after a budget update, and the killed state survive updates;
+a new PID still starts with fresh state. Idle cadence/control observers park
+rather than busy-spin, and the cadence publishes a wake event after its frame
+counter. These are overhead fixes, not evidence that 750 Hz cold-start timing
+is established on every emulator host.
+
+The serial functional profile explicitly uses 800 us budgets and 4,000/4,800 us
+deadlines in its 5 ms frame; it requires zero plugin budget/deadline failures
+as well as zero missing output blocks/watchdog overruns during the checked
+live edits and restored run. The fast diagnostic retains its separate 400 us,
+1,000/1,200 us contracts for the 1.333 ms frame. The profile and counters are
+saved in each result JSON, avoiding ambiguous comparisons between the two.

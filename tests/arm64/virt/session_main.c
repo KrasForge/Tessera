@@ -22,7 +22,10 @@ extern char session_source_start[], session_source_end[], session_gain_start[],
     session_gain_end[];
 extern char session_hog_start[], session_hog_end[], session_sine_start[],
     session_sine_end[];
-#define RATE 48000u
+#ifndef SESSION_RATE
+#define SESSION_RATE 48000u
+#endif
+#define RATE SESSION_RATE
 #ifndef SESSION_FRAMES
 #define SESSION_FRAMES 64u
 #endif
@@ -149,6 +152,9 @@ void scheduler_tick(struct trapframe *tf) {
   if (elapsed > ticks / 2)
     __atomic_fetch_add(&irq_overruns, 1, __ATOMIC_RELAXED);
   __atomic_fetch_add(&callbacks, 1, __ATOMIC_RELEASE);
+  /* Wake the serial observer after publishing the cadence count. Idle
+   * control must not burn a host/physical core merely waiting for audio. */
+  __asm__ volatile("dsb ishst; sev" ::: "memory");
 }
 
 static void worker_main(void *ctx) {
@@ -172,7 +178,11 @@ static int wait_cmd(shell_t *sh, int n, char **v) {
   while (__atomic_load_n(&callbacks, __ATOMIC_ACQUIRE) < end) {
     if (clock_now() >= timeout)
       return SESSION_ETIMEOUT;
-    __asm__ volatile("yield");
+#ifdef SESSION_AUTOTEST
+    __asm__ volatile("wfi" ::: "memory"); /* CPU0 owns the cadence IRQ */
+#else
+    __asm__ volatile("wfe" ::: "memory"); /* CPU3 wakes after published frame */
+#endif
   }
   return 0;
 }
@@ -221,6 +231,7 @@ static void initialize(void) {
   enable_readonly_counter();
   __asm__ volatile("mrs %0,cntfrq_el0" : "=r"(hz));
   ticks = hz / HZ;
+  uart_printf("audio format: sample_rate=%u frames=%u\r\n", RATE, FRAMES);
   audio_worker_t *ws[3];
   for (unsigned i = 0; i < 3; ++i) {
     aw_init(&workers[i], i + 1);
@@ -451,6 +462,8 @@ static void console_main(void *ctx) {
     int c = uart_getc();
     if (c >= 0)
       shell_feed(&shell, (char)c);
+    else
+      __asm__ volatile("wfe" ::: "memory");
   }
   require(!session_pause(&app), "console pause");
   require(!session_clear(&app), "interactive cleanup");

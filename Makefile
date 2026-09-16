@@ -3194,7 +3194,8 @@ build-arm-session: $(ARM_BUILD_DIR)/plugin_session_source.elf $(ARM_BUILD_DIR)/p
 	$(ARM_LD) -T $(VIRT_DIR)/session.ld -o $(ARM_BUILD_DIR)/session/kernel.elf $(ARM_BUILD_DIR)/session/*.o
 
 test-arm-session-qemu:
-	$(MAKE) -j1 build-arm-session SESSION_DEFS="-DSESSION_AUTOTEST -DSESSION_FRAMES=240"
+	# Capacity is an explicit 12 kHz / 240-sample (20 ms) emulation profile.
+	$(MAKE) -j1 build-arm-session SESSION_DEFS="-DSESSION_AUTOTEST -DSESSION_FRAMES=240 -DSESSION_RATE=12000"
 	timeout 45 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
 	    -display none -serial file:$(ARM_BUILD_DIR)/session/acceptance.log -net none \
 	    -kernel $(ARM_BUILD_DIR)/session/kernel.elf
@@ -3207,7 +3208,7 @@ run-arm-workstation: build-arm-session
 
 .PHONY: test-arm-session-console
 test-arm-session-console:
-	$(MAKE) -j1 build-arm-session SESSION_DEFS=
+	$(MAKE) -j1 build-arm-session SESSION_DEFS=-DSESSION_FRAMES=240
 	python3 scripts/test_session_console.py --build-dir $(ARM_BUILD_DIR)
 
 
@@ -3228,6 +3229,12 @@ test-arm-session-concurrency: | $(ARM_BUILD_DIR)
 # auto-capacity and interactive variants serial: they share plugin ELFs.
 .PHONY: test-arm-m11-m13
 test-arm-m11-m13:
-	$(MAKE) -j1 arm test-arm-temporal-multicore test-arm-session-codec \
+	$(MAKE) -j1 arm test-arm-temporal test-arm-temporal-multicore test-arm-session-codec \
 	    test-arm-session-concurrency test-arm-shell test-arm-shell-graph test-arm-patch \
 	    test-arm-session-qemu test-arm-session-console
+
+# Strict 48 kHz / 64-frame wall-clock diagnostic; no retries or allowances.
+.PHONY: test-arm-session-console-fast
+test-arm-session-console-fast:
+	$(MAKE) -j1 build-arm-session SESSION_DEFS=
+	python3 scripts/test_session_console.py --build-dir $(ARM_BUILD_DIR) --mode wallclock

@@ -36,7 +36,7 @@ class Console:
         self.selector.register(self.proc.stdout,selectors.EVENT_READ)
         self.buffer = b''
         try:
-            self.read_prompt()
+            self.boot_text = self.read_prompt()
         except BaseException:
             self.close()
             raise
@@ -138,8 +138,18 @@ def main() -> None:
         check('pid 1' in c.send('load /sd/SOURCE.ELF'),'load source from FAT')
         check('pid 2' in c.send('load /sd/GAIN.ELF'),'load gain from FAT')
         c.send('wire 1 2');c.send('wire 2 dac')
-        c.send('contract 1 hard 400us deadline=1000us policy=mute')
-        c.send('contract 2 hard 400us deadline=1200us policy=mute')
+        audio=re.search(r'audio format: sample_rate=(\d+) frames=(\d+)',c.boot_text)
+        check(audio is not None,'declared application audio profile')
+        rate,frames=map(int,audio.groups())
+        evidence['sample_rate']=rate;evidence['frames']=frames
+        if frames==240 and rate==48000:
+            # Functional 5 ms period: explicit reservations, not hardware WCET.
+            c.send('contract 1 hard 800us deadline=4000us policy=mute')
+            c.send('contract 2 hard 800us deadline=4800us policy=mute')
+        else:
+            check(frames==64 and rate==48000,'supported fast diagnostic profile')
+            c.send('contract 1 hard 400us deadline=1000us policy=mute')
+            c.send('contract 2 hard 400us deadline=1200us policy=mute')
         c.send('pin 1 2');c.send('pin 2 1');c.send('set-param 2 0 0.5')
         c.send('cores 3',True);c.send('start');c.send('wait 128')
         inspection=c.send('inspect')
@@ -156,7 +166,12 @@ def main() -> None:
             c.send('pin 1 1');c.send('pin 1 2')
         c.send('wait 32')
         check(sample(c.send('inspect'))==reference,'live edits retain exact signal')
-        continuity=c.send('inspect');print(continuity+c.send('stats'),flush=True)
+        continuity=c.send('inspect'); live_stats=c.send('stats');print(continuity+live_stats,flush=True)
+        live_counts=re.findall(r'plugin pid=(\d+)(?: cpu=\d+)? runs=(\d+) completed=(\d+) budget=(\d+) deadline=(\d+) shed=(\d+) killed=(\d+)',live_stats)
+        check(len(live_counts)==2,'live per-plugin counters')
+        if frames==240:
+            check(all(all(int(n)==0 for n in row[3:]) for row in live_counts),'live DSP deadline/budget continuity')
+
         check(int(re.search(r'missing=(\d+)',continuity)[1])==before_missing,'live edits dropped audio')
         check('watchdog=0' in continuity,'live edits exceeded audio IRQ budget')
         c.send('unload 4294967297',True)
@@ -195,6 +210,8 @@ def main() -> None:
         counters=re.findall(r'plugin pid=(\d+)(?: cpu=\d+)? runs=(\d+) completed=(\d+) budget=(\d+) deadline=(\d+) shed=(\d+) killed=(\d+)',stats)
         check(len(counters)==2,'both live deadline/budget counters exposed')
         evidence['wallclock_plugin_counters']=[list(map(int,row)) for row in counters]
+        if frames==240:
+            check(all(all(int(n)==0 for n in row[3:]) for row in counters),'restored DSP deadline/budget continuity')
         # This serial/FAT correctness test retains and reports timing misses;
         # strict capacity/deadline acceptance is a separate fixture.
 

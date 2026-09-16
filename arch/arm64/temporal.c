@@ -156,6 +156,22 @@ static void add(uint64_t *v, uint64_t amount)
 static void adopt(temporal_scheduler_t *s, uint64_t frame)
 {
     if (!__atomic_load_n(&s->pending_ready, __ATOMIC_ACQUIRE)) return;
+    /* The multicore executor uses a singleton scheduler per stable PID.
+     * Preserve its state in place: copying/clearing sixteen task states and
+     * two full plan arrays here would spend the first deadline on bookkeeping.
+     * Gap accounting already ran under the old contract before this adoption. */
+    if (s->active.count == 1 && s->pending.count == 1 &&
+        s->state[0].pid == s->pending.task[0].pid &&
+        s->active.task[0].pid == s->pending.task[0].pid) {
+        s->active.limits = s->pending.limits;
+        s->active.task[0] = s->pending.task[0];
+        s->active.deps[0] = s->pending.deps[0];
+        s->active.order[0] = s->pending.order[0];
+        s->active.reserved_ticks = s->pending.reserved_ticks;
+        s->active_valid = 1;
+        __atomic_store_n(&s->pending_ready, 0u, __ATOMIC_RELEASE);
+        return;
+    }
     tc_task_state_t old[TC_MAX_TASKS];
     for (uint32_t i = 0; i < TC_MAX_TASKS; ++i) old[i] = s->state[i];
     s->active = s->pending;

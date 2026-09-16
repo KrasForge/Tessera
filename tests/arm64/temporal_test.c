@@ -315,11 +315,39 @@ static void test_admission_execution_property(void)
     printf("admission/execution property: %u accepted, %u rejected graphs\n", admitted, rejected);
 }
 
+static void test_singleton_strikes_survive_update(void)
+{
+    audio_graph_t g; graph(&g, 1);
+    temporal_contract_t c = task(1,1000,800,100,TC_HARD,TC_MUTE_THEN_KILL);
+    temporal_scheduler_t scheduler; tc_scheduler_init(&scheduler);
+    fake_t f = {0}; f.result[1] = TC_RUN_BUDGET;
+    CHECK(tc_stage(&scheduler,&g,&c,1,&limits,NULL)==TC_OK);
+    CHECK(frame(&scheduler,&f,1,10)==TC_OK);
+    CHECK(frame(&scheduler,&f,2,10)==TC_OK);
+    CHECK(tc_state(&scheduler,1)->streak==2);
+    c.cpu_budget=120;
+    CHECK(tc_stage(&scheduler,&g,&c,1,&limits,NULL)==TC_OK);
+    uint64_t reserved=scheduler.pending.reserved_ticks;
+    CHECK(frame(&scheduler,&f,3,10)==TC_OK);
+    CHECK(tc_state(&scheduler,1)->killed && tc_state(&scheduler,1)->budget_overruns==3);
+    CHECK(tc_state(&scheduler,1)->activated_frame==1 && scheduler.active.reserved_ticks==reserved);
+    c.overrun_policy=TC_MUTE;c.kill_after=0;
+    CHECK(tc_stage(&scheduler,&g,&c,1,&limits,NULL)==TC_OK);
+    CHECK(frame(&scheduler,&f,4,10)==TC_OK && f.runs[1]==3 && f.kills[1]==1);
+    audio_graph_remove_node(&g,audio_graph_node_by_pid(&g,1));
+    CHECK(audio_graph_add_node(&g,2)>=0);c.pid=2;
+    CHECK(tc_stage(&scheduler,&g,&c,1,&limits,NULL)==TC_OK);
+    CHECK(frame(&scheduler,&f,5,10)==TC_OK);
+    CHECK(tc_state(&scheduler,2)->completed==1 && !tc_state(&scheduler,2)->killed);
+    CHECK(tc_state(&scheduler,2)->activated_frame==5 && !tc_state(&scheduler,1));
+}
+
 int main(void)
 {
     test_admission(); test_dependencies(); test_rates_and_edf(); test_policies();
     test_lateness_and_recovery(); test_best_effort_and_updates(); test_handoff();
     test_period_change_after_gap(); test_admission_execution_property();
+    test_singleton_strikes_survive_update();
     printf("TEMPORAL HOST: PASS (%u checks; 10000 concurrent plan updates)\n", checks);
     return 0;
 }
