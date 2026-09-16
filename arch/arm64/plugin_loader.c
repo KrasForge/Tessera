@@ -1,3 +1,4 @@
+#include "el0_context.h"
 /* arch/arm64/plugin_loader.c - load a plugin ELF into an isolated address
  *                              space (Issue #24, M5) */
 
@@ -7,6 +8,7 @@
 #include "vmem.h"
 #include "pmm.h"
 #include "sandbox.h"
+#include "budget.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -67,11 +69,20 @@ static int map_segment(plugin_t *pl, const unsigned char *elf, size_t len,
         }
         /* Tail of the page (incl. .bss) is already zero from the allocator. */
 
-        if (process_map(pl->proc, pa, page, PAGE_SIZE, flags) != 0)
+        if (process_map(pl->proc, pa, page, PAGE_SIZE, flags) != 0) {
+            phys_free_page(pa);
             return PLUGIN_ENOMEM;
+        }
     }
     record_region(pl, seg_va, memsz, flags);
     return PLUGIN_OK;
+}
+
+static int load_failed(plugin_t *pl, int error)
+{
+    if (pl->proc) process_destroy(pl->proc);
+    pl->proc = (process_t *)0;
+    return error;
 }
 
 int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name)
@@ -96,12 +107,12 @@ int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name)
             continue;
         int r = map_segment(pl, img, len, ph);
         if (r != PLUGIN_OK)
-            return r;
+            return load_failed(pl, r);
     }
 
     /* Resolve the ABI entry points.  plugin_init is mandatory. */
     if (!elf64_symval(elf, len, "plugin_init", &pl->init_va))
-        return PLUGIN_ENOSYM;
+        return load_failed(pl, PLUGIN_ENOSYM);
     elf64_symval(elf, len, "plugin_abi_version",   &pl->abi_version_va);
     elf64_symval(elf, len, "plugin_process_block", &pl->process_va);
     elf64_symval(elf, len, "plugin_set_param",     &pl->setparam_va);
@@ -109,30 +120,37 @@ int plugin_load(plugin_t *pl, const void *elf, size_t len, const char *name)
 
     /* Stack (RW). */
     uintptr_t stk = phys_alloc_page_zero();
-    if (!stk || process_map(pl->proc, stk, PLUGIN_STACK_VA, PAGE_SIZE,
-                            VMM_READ | VMM_WRITE) != 0)
-        return PLUGIN_ENOMEM;
+    if (!stk) return load_failed(pl, PLUGIN_ENOMEM);
+    if (process_map(pl->proc, stk, PLUGIN_STACK_VA, PAGE_SIZE,
+                    VMM_READ | VMM_WRITE) != 0) {
+        phys_free_page(stk);
+        return load_failed(pl, PLUGIN_ENOMEM);
+    }
     pl->stack_top = PLUGIN_STACK_VA + PAGE_SIZE;
     record_region(pl, PLUGIN_STACK_VA, PAGE_SIZE, VMM_READ | VMM_WRITE);
 
     /* Entry trampoline (RX): copy the host code into a plugin page. */
     uintptr_t tpa = phys_alloc_page_zero();
-    if (!tpa)
-        return PLUGIN_ENOMEM;
+    if (!tpa) return load_failed(pl, PLUGIN_ENOMEM);
     size_t tlen = (size_t)(plugin_tramp_end - plugin_tramp_start);
     memcpy((void *)tpa, plugin_tramp_start, tlen);
     if (process_map(pl->proc, tpa, PLUGIN_TRAMP_VA, PAGE_SIZE,
-                    VMM_READ | VMM_EXEC) != 0)
-        return PLUGIN_ENOMEM;
+                    VMM_READ | VMM_EXEC) != 0) {
+        phys_free_page(tpa);
+        return load_failed(pl, PLUGIN_ENOMEM);
+    }
     pl->entry_va = PLUGIN_TRAMP_VA;
     record_region(pl, PLUGIN_TRAMP_VA, PAGE_SIZE, VMM_READ | VMM_EXEC);
 
     /* Parameter page (RW): kept also kernel-visible (identity PA) so the host
      * can write the call arguments before each entry. */
     uintptr_t ppa = phys_alloc_page_zero();
-    if (!ppa || process_map(pl->proc, ppa, PLUGIN_PARAM_VA, PAGE_SIZE,
-                            VMM_READ | VMM_WRITE) != 0)
-        return PLUGIN_ENOMEM;
+    if (!ppa) return load_failed(pl, PLUGIN_ENOMEM);
+    if (process_map(pl->proc, ppa, PLUGIN_PARAM_VA, PAGE_SIZE,
+                    VMM_READ | VMM_WRITE) != 0) {
+        phys_free_page(ppa);
+        return load_failed(pl, PLUGIN_ENOMEM);
+    }
     pl->param_pa = ppa;
     pl->param_va = PLUGIN_PARAM_VA;
     record_region(pl, PLUGIN_PARAM_VA, PAGE_SIZE, VMM_READ | VMM_WRITE);
@@ -161,32 +179,49 @@ int plugin_sandbox_regions(const plugin_t *pl, struct sandbox_region *out, int m
     return n;
 }
 
-/* Fill the trampoline param block (function VA + up to five 64-bit args) and
- * run the plugin at EL0, returning the function's value (or -1 if it faulted
- * and was killed). */
-static long call_fn(plugin_t *pl, uint64_t fn, uint64_t a0, uint64_t a1,
-                    uint64_t a2, uint64_t a3, uint64_t a4)
+/* Weak linkage preserves tiny legacy fixtures; requesting protection without
+ * the timer implementation returns ENOTSUP rather than executing unbounded. */
+extern long budget_call(long (*run)(void *), void *ctx, uint64_t cycles) __attribute__((weak));
+static long enter_plugin(void *ctx)
 {
-    volatile uint64_t *pb = (volatile uint64_t *)pl->param_pa;
-    pb[0] = fn;
-    pb[1] = a0;
-    pb[2] = a1;
-    pb[3] = a2;
-    pb[4] = a3;
-    pb[5] = a4;
+    plugin_t *pl = ctx;
     return process_run(pl->proc, pl->entry_va, pl->stack_top, pl->param_va);
+}
+
+static long call_fn(plugin_t *pl, uint64_t fn, uint64_t a0, uint64_t a1,
+                    uint64_t a2, uint64_t a3, uint64_t a4, uint64_t mode)
+{
+    if (!pl || !pl->proc || !fn || !pl->param_pa) return -1;
+    uint32_t idle = 0;
+    if (!__atomic_compare_exchange_n(&pl->call_busy, &idle, 1u, 0,
+                                     __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+        return PLUGIN_EBUSY;
+    volatile uint64_t *pb = (volatile uint64_t *)pl->param_pa;
+    pb[0] = fn; pb[1] = a0; pb[2] = a1; pb[3] = a2;
+    pb[4] = a3; pb[5] = a4; pb[6] = mode;
+    long result;
+    if (pl->lifecycle_ticks && fn != pl->process_va) {
+        result = budget_call ? budget_call(enter_plugin, pl, pl->lifecycle_ticks) : PLUGIN_ENOTSUP;
+        if (result == BUDGET_PREEMPTED) {
+            process_kill(pl->proc, PLUGIN_ETIMEOUT);
+            result = PLUGIN_ETIMEOUT;
+        }
+    } else result = enter_plugin(pl);
+    __atomic_store_n(&pl->call_busy, 0u, __ATOMIC_RELEASE);
+    return result;
 }
 
 long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size)
 {
-    return call_fn(pl, pl->init_va, sample_rate, block_size, 0, 0, 0);
+    if (!pl || __atomic_load_n(&pl->host_refs, __ATOMIC_ACQUIRE)) return PLUGIN_EBUSY;
+    return call_fn(pl, pl->init_va, sample_rate, block_size, 0, 0, 0, 0);
 }
 
 long plugin_call_abi_version(plugin_t *pl)
 {
     if (!pl->abi_version_va)
         return -1;
-    return call_fn(pl, pl->abi_version_va, 0, 0, 0, 0, 0);
+    return call_fn(pl, pl->abi_version_va, 0, 0, 0, 0, 0, 0);
 }
 
 long plugin_call_block(plugin_t *pl, uint64_t in_l, uint64_t in_r,
@@ -194,5 +229,27 @@ long plugin_call_block(plugin_t *pl, uint64_t in_l, uint64_t in_r,
 {
     if (!pl->process_va)
         return -1;
-    return call_fn(pl, pl->process_va, in_l, in_r, out_l, out_r, n_frames);
+    return call_fn(pl, pl->process_va, in_l, in_r, out_l, out_r, n_frames, 2);
+}
+
+long plugin_call_set_param(plugin_t *pl, uint32_t id, uint32_t value_bits)
+{
+    if (!pl || __atomic_load_n(&pl->host_refs, __ATOMIC_ACQUIRE)) return PLUGIN_EBUSY;
+    return call_fn(pl, pl ? pl->setparam_va : 0, id, value_bits, 0, 0, 0, 3);
+}
+
+long plugin_call_destroy(plugin_t *pl)
+{
+    if (!pl || !pl->destroy_va) return 0;
+    if (__atomic_load_n(&pl->host_refs, __ATOMIC_ACQUIRE)) return PLUGIN_EBUSY;
+    return call_fn(pl, pl->destroy_va, 0, 0, 0, 0, 0, 2);
+}
+
+extern int budget_active(void) __attribute__((weak));
+long plugin_call_set_param_worker(plugin_t *pl, uint32_t id, uint32_t value_bits)
+{
+    if (!pl || !pl->bound_cpu || pl->bound_cpu != el0_cpu_index() ||
+        !__atomic_load_n(&pl->host_refs, __ATOMIC_ACQUIRE) || !budget_active || !budget_active())
+        return PLUGIN_EBUSY;
+    return call_fn(pl, pl->setparam_va, id, value_bits, 0, 0, 0, 3);
 }

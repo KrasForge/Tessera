@@ -8,8 +8,11 @@ issue #40 defines.
 
 - The shell **core** (issue #80) is the line editor, tokeniser, and command
   dispatcher: [`arch/arm64/shell.c`](../arch/arm64/shell.c).
-- The **graph and patch commands** (issues #81/#82) are in
-  [`arch/arm64/shell_graph.c`](../arch/arm64/shell_graph.c).
+- The original **graph and patch command** issue fixtures (#81/#82) use
+  [`arch/arm64/shell_graph.c`](../arch/arm64/shell_graph.c). The production
+  multicore workstation registers the corresponding managed commands in
+  [`arch/arm64/session_shell.c`](../arch/arm64/session_shell.c), so serial
+  control goes through the same frame-boundary session engine as M11.
 
 ## Commands
 
@@ -33,57 +36,81 @@ patch) each prints a single-line error and leaves the graph untouched.
 
 ## Session: build, tweak, save, reboot, reload
 
-This is the M13 "no C" acceptance, verified end to end on QEMU by
-`make test-arm-shell-patch-qemu`. A user builds a `synth -> filter -> DAC`
-chain, saves it, reboots the board, reloads the patch, and hears exactly the
-same audio - every step typed at the console, nothing recompiled.
+`make -j1 test-arm-m13 CROSS_COMPILE=aarch64-linux-gnu-` is the complete M13
+software gate. It retains the original issue fixtures — including the real-UART
+#80 reporter-interleaving test, the #81 `synth -> filter -> DAC` console build,
+and the #82 console save/reboot/reload test — and also drives the production
+multicore workstation through two independent QEMU processes.
 
-```
-tessera> load /rd/synth
+The production cold-boot runner uses an explicitly declared 12 kHz / 240-sample
+(20 ms) QEMU functional profile and executes this flow over the real PL011
+console. The longer emulation frame separates shell/session correctness from
+host-scheduler timing; every missing/skipped frame and plugin offence is still
+an acceptance failure. The 48 kHz / 64-sample stress diagnostic remains
+separate.
+
+
+```text
+tessera> load /sd/SOURCE.ELF
 loaded pid 1
-tessera> load /rd/effect
+tessera> load /sd/GAIN.ELF
 loaded pid 2
 tessera> wire 1 2
-wired
+ok
 tessera> wire 2 dac
-wired
-tessera> set-param 1 0 880
-set
-tessera> run
-rendered one block; dac-hash 0x229df365
-tessera> patch save /sd/live.patch
-saved /sd/live.patch
-tessera> reboot
-rebooted (graph cleared; SD card intact)
+ok
+tessera> contract 1 hard 2000us deadline=17000us policy=mute
+ok
+tessera> contract 2 hard 2000us deadline=19500us policy=mute
+ok
+tessera> pin 1 2
+tessera> pin 2 1
+tessera> set-param 2 0 0.5
+tessera> start
+tessera> wait 128
+tessera> inspect
+tessera> patch save /sd/LIVE.TSP
+tessera> patch load /sd/MISSING.TSP
+error: file not found or storage I/O error
+tessera> pause
 tessera> patch ls
 patches:
-  LIVE.PAT
-tessera> patch load /sd/live.patch
-loaded /sd/live.patch
-tessera> run
-rendered one block; dac-hash 0x229df365
-tessera> patch load /sd/missing.patch
-error: patch load: no such file/pid
+  LIVE.TSP
 ```
 
-The `dac-hash` after reload is bit-for-bit identical to the one before the
-reboot: the graph, its wiring, and the 880 Hz parameter all round-tripped
-through the human-readable patch on the SD card (see
-[`docs/patches.md`](patches.md) for the file format). Loading a patch that is
-missing - or, in the M9 test, one that is truncated - is reported as an error
-and the shell keeps running.
+The test exports only the FAT-backed storage region, exits the emulator, starts
+a new emulator process with no preserved process memory, then continues:
 
-(`run` and `reboot` in the transcript are test-harness verbs that render a
-block and model a power cycle; on hardware the audio engine renders
-continuously and a reboot is a real one. Everything else is a production shell
-command.)
+```text
+tessera> patch load /sd/LIVE.TSP
+tessera> start
+tessera> wait 64
+tessera> inspect
+```
+
+The restored PCM hash and samples must be bit-identical to the first boot. The
+runner then injects malformed, partially loadable, and incompatible session
+files; each `patch load` must emit exactly one error line, retain the running
+graph and keep producing the reference audio. A live `set-param` after restore
+must change the real plugin output, and `ls` must show the current parameter bit
+pattern. `patch ls` lists session files only, not the plugin ELF inventory.
+
+`wait`, `inspect`, and `quit` are QEMU observation/lifecycle commands. They are
+not needed to build, edit, save, or restore a patch on a physical system. The
+storage in this acceptance test is a memory-backed FAT image; physical SD and
+I2S acceptance remain part of M10.
 
 ## Sharing the UART
 
-On the target the shell runs off the audio core (CPU0 is untouchable) and
-shares the one UART with the periodic `audio_latency:` reporter. The platform
-serialises whole messages with a lock, so shell responses and reporter lines
-never tear on the wire (issue #80).
+The original #80 QEMU fixture keeps CPU0 exclusively on audio, runs the shell on
+CPU1, and emits periodic `audio_latency:` lines from CPU2 through a whole-message
+UART lock. Its acceptance check proves the reporter and interactive responses do
+not tear while CPU0 records zero overruns.
+
+The production M11/M13 workstation reserves CPU3 for serial control and keeps
+file I/O, ELF parsing and UART output off the audio IRQ. Runtime statistics are
+available on demand through `stats`; DSP workers remain on CPU1/2 in the
+interactive profile.
 
 ## `prof` - per-plugin profiler (issue #129)
 

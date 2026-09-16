@@ -1,0 +1,39 @@
+name: M11 multicore and M13 workstation
+on:
+  push:
+    branches: [main, 'fix/m11-m13*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  multicore-workstation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compiler and emulator
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+      - name: Record environment
+        run: |
+          aarch64-linux-gnu-gcc --version
+          qemu-system-aarch64 --version
+          python3 --version
+      - name: Multicore, session, serial and cold-boot acceptance
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/arm/m11-m13-validation
+          make -j1 test-arm-m11-m13 CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build/arm/m11-m13-validation/aggregate.log
+      - name: Retain successes and failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m11-m13-${{ github.sha }}
+          path: |
+            build/arm/m11-m13-validation/**
+            build/arm/session/*.log
+          if-no-files-found: warn

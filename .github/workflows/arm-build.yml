@@ -49,16 +49,19 @@ jobs:
             echo "          (needs QEMU >= 9.0); skipping the hardware boot-smoke."
             exit 0
           fi
-          timeout 60 qemu-system-aarch64 \
+          if timeout 60 qemu-system-aarch64 \
             -machine raspi4b \
             -nographic \
             -serial stdio \
             -no-reboot \
             -kernel build/arm/kernel8.img \
             2>/dev/null \
-          | grep -m1 "Tessera ARM boot OK" \
-          && echo "Boot smoke test PASSED" \
-          || { echo "Boot smoke test FAILED — boot message not seen within 60 s"; exit 1; }
+          | grep -m1 "Tessera ARM boot OK"; then
+            echo "Boot smoke test PASSED"
+          else
+            echo "Boot smoke test FAILED — boot message not seen within 60 s"
+            exit 1
+          fi
 
   m1-unit-tests:
     name: M1 memory-subsystem host unit tests
@@ -225,7 +228,7 @@ jobs:
         run: make test-arm-multicore-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
   time-safety-tests:
-    name: M12 time safety - per-plugin service-time accounting
+    name: M12 time safety - accounting, enforcement and resilience
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
@@ -237,14 +240,11 @@ jobs:
           sudo apt-get install -y -q \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
 
-      - name: Plugin-time host unit tests (accounting + seqlock board, ASan + UBSan)
-        run: make test-arm-ptime
+      - name: Complete M12 acceptance (host math, real EL0 enforcement, resilience, control, latency)
+        run: make test-arm-m12 CROSS_COMPILE=aarch64-linux-gnu-
 
-      - name: Per-plugin time reporting on QEMU virt (calibrated nodes + reporter)
-        run: make test-arm-ptime-qemu CROSS_COMPILE=aarch64-linux-gnu-
-
-      - name: Budget-policy host unit tests (escalation + registry, ASan + UBSan)
-        run: make test-arm-budget
+      - name: Temporal contracts and managed runtime (host races and multicore EL0)
+        run: make test-arm-temporal-all CROSS_COMPILE=aarch64-linux-gnu-
 
       - name: Syscall / I/O-rate quota host unit tests (throttle + kill escalation, ASan + UBSan)
         run: make test-arm-iobudget
@@ -266,9 +266,6 @@ jobs:
 
       - name: USB Audio Class host unit tests (UAC1 descriptor parse + iso framing, ASan + UBSan)
         run: make test-arm-usbaudio
-
-      - name: Budget enforcement on QEMU virt (preempt at boundary, mute, kill)
-        run: make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
   control-shell-tests:
     name: M13 control shell - serial shell core + interleaved reporter
@@ -298,20 +295,8 @@ jobs:
       - name: OSC editor-protocol host unit tests (codec layout/round-trip/dispatch, ASan + UBSan)
         run: make test-arm-osc
 
-      - name: Shell-core host unit tests (tokenise + dispatch + fuzz, ASan + UBSan)
-        run: make test-arm-shell
-
-      - name: Serial shell on QEMU virt (real UART RX + shared-wire reporter)
-        run: make test-arm-shell-qemu CROSS_COMPILE=aarch64-linux-gnu-
-
-      - name: Shell graph-command host unit tests (verbs + ls/stats, ASan + UBSan)
-        run: make test-arm-shell-graph
-
-      - name: Build a graph from the console on QEMU virt (synth -> filter -> DAC)
-        run: make test-arm-shell-graph-qemu CROSS_COMPILE=aarch64-linux-gnu-
-
-      - name: Patch save/reboot/reload from the console on QEMU virt (no-C acceptance)
-        run: make test-arm-shell-patch-qemu CROSS_COMPILE=aarch64-linux-gnu-
+      - name: Complete M13 serial-workstation acceptance
+        run: make -j1 test-arm-m13 CROSS_COMPILE=aarch64-linux-gnu-
 
   latency-tests:
     name: M4 latency - audio jitter stats host tests + QEMU virt reporting
@@ -602,7 +587,7 @@ jobs:
         run: make test-arm-sandbox-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
   resilience-demo:
-    name: M8 resilience demo - malicious plugin killed, audio keeps running (x10)
+    name: M8/M12 resilience - crash, syscall and CPU-hog containment (x10)
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
@@ -614,7 +599,7 @@ jobs:
           sudo apt-get install -y -q \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
 
-      - name: Resilience demo on QEMU virt (good keeps playing; crash+evil killed 10x, no leak)
+      - name: Resilience demo on QEMU virt (good keeps playing; crash+evil+hog killed 10x, no leak)
         run: make test-arm-resilience-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
       - name: Safe-mode bypass host unit tests (resolve logic, ASan + UBSan)
@@ -635,7 +620,7 @@ jobs:
       - name: Glitch-free patch-switch host unit tests (crossfade mixer, ASan + UBSan)
         run: make test-arm-patch-switch
 
-      - name: Glitch-free patch switching on QEMU virt (crossfade: never silent + click-free)
+      - name: "Glitch-free patch switching on QEMU virt (crossfade: never silent + click-free)"
         run: make test-arm-patch-switch-qemu CROSS_COMPILE=aarch64-linux-gnu-
 
       - name: Plugin hot-reload host unit tests (reload state machine, ASan + UBSan)
