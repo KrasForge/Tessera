@@ -79,3 +79,33 @@ board boot remains the bring-up/self-test image; `run-arm-workstation` starts
 the runnable QEMU application. FAT persistence testing uses memory-backed
 storage exported/imported between independent emulator processes, not a
 physical SD peripheral or a power-loss test.
+
+
+## Hosted result for the functional-profile revision
+
+Run **35144333046**, commit **becb65f5f6bb225ac982fd4bfcfcf92ffccd19ed**,
+finished with **failure**, not success. M11 passed: all three plugins completed
+129/129 jobs with zero budget/deadline misses; serial work measured 24,520 us
+against a 20,000 us frame; cross-core PCM, faults on CPU1/2/3, and session
+save/reload checks passed.
+
+The real serial test completed all 18 live graph swaps with zero missing output
+frames and zero audio watchdog overruns, but its strict plugin-budget assertion
+failed: source had two budget offences and gain had one. Their maximum observed
+elapsed times were 91,398 and 60,070 counter ticks (about 1,462 and 961 us) against
+800 us contracts. Neither was killed, and neither recorded a deadline miss.
+The hosted run stopped there, so its two-boot sequence was **not completed**.
+Earlier local two-boot success must not be attributed to this hosted run.
+
+A subsequent explicit instruction-counted serial diagnostic also failed the
+strict live-edit timing conditions (25 missing frames, and per-plugin deadline
+misses). It is retained as a failed diagnostic, not substituted for wall-clock
+success. Its runner's duplicate accelerator arguments and undefined shift
+metadata were corrected; the diagnostic now reaches the actual assertions
+rather than failing with a Python argument error.
+
+**Current conclusion:** M11/M13 implementation and local functional acceptance
+are present, and M11 passed hosted acceptance. The complete hosted M11/M13 gate
+is not verified green; strict M13 timing under emulator scheduling remains an
+open acceptance item. No retry-until-green, disabled assertion, hidden failure
+or claim of physical audio continuity is part of this result.

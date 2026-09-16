@@ -24,10 +24,6 @@ class Console:
             cmd += ['-accel','tcg,thread=single','-icount','shift=3,align=off,sleep=off']
         else:
             cmd += ['-accel','tcg,thread=multi']
-        if mode == 'deterministic':
-            cmd += ['-accel','tcg,thread=single','-icount',f'shift={shift},align=off,sleep=off']
-        else:
-            cmd += ['-accel','tcg,thread=multi']
         if image is not None:
             cmd += ['-device',f'loader,file={image},addr={address},force-raw=on']
         (directory / (name+'.command.json')).write_text(json.dumps(cmd,indent=2))
@@ -131,7 +127,7 @@ def main() -> None:
     symbols=subprocess.check_output(['aarch64-linux-gnu-nm','-S',str(binary)],text=True)
     row=next(line.split() for line in symbols.splitlines() if line.endswith(' session_sd'))
     address,size=int(row[0],16),int(row[1],16)
-    evidence={'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'boots':2,'mode':args.mode,'cold_boot':True,'storage':'QMP-exported memory-backed FAT image','timing_mode':args.mode,'icount_shift':args.shift if args.mode=='deterministic' else None}
+    evidence={'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'boots':2,'mode':args.mode,'cold_boot':True,'storage':'QMP-exported memory-backed FAT image','timing_mode':args.mode,'icount_shift':3 if args.mode=='deterministic' else None}
     c=Console(binary,directory,'boot-1',None,address,args.mode)
     try:
         check('contract' in c.send('help'),'contract help')
