@@ -14,9 +14,8 @@ library—all without Linux underneath the runtime.
 
 > **Current status:** the software platform is extensively verified on QEMU `virt`,
 > including real EL0 plugin execution, MMU faults, budget preemption, multicore DSP,
-> graph mutation, persistence, and serial control. **Physical CM4/Pi 4 acceptance is
-> still M10 work**: real BCM2711 boot/SD, I2S+DMA, and measured hardware latency are
-> not yet claimed complete.
+> graph mutation, persistence, and serial control. **Physical CM4/Pi 4 acceptance is still incomplete**: real BCM2711 boot/SD,
+> I2S+DMA, and measured hardware latency are not yet claimed complete.
 
 ---
 
@@ -66,7 +65,7 @@ See [`docs/plugin-abi.md`](docs/plugin-abi.md) and
 
 ### Real-time graph and multicore scheduling
 
-CPU0 owns the audio cadence while isolated DSP jobs run on worker cores. The M11/M12
+CPU0 owns the audio cadence while isolated DSP jobs run on worker cores. The temporal
 runtime admits a graph before execution using per-plugin periods, deadlines, budgets,
 criticality, dependencies, and optional core affinity. Same-frame cross-core edges use
 bounded handoff rather than allowing a worker to stall the audio core.
@@ -81,11 +80,12 @@ Implemented pieces include:
 - per-plugin runtime counters and service-time snapshots;
 - live reconfiguration without doing ELF loading or filesystem work in the audio IRQ.
 
-The strict M11 QEMU fixture proves that work which overruns one worker can execute
+The strict multicore QEMU fixture proves that work which overruns one worker can execute
 across CPU1-3 while CPU0 keeps cadence, and exercises crash/hog containment on every
 worker core.
 
-See [`docs/m11-m13-workstation.md`](docs/m11-m13-workstation.md).
+See [`docs/temporal-contracts.md`](docs/temporal-contracts.md) and
+[`docs/shell.md`](docs/shell.md).
 
 ### Interactive workstation
 
@@ -109,7 +109,7 @@ patch save /sd/LIVE.TSP
 ```
 
 `patch load` reconstructs plugin paths, parameters, contracts, affinity, and wiring.
-The M13 acceptance test saves a session to a FAT image, terminates QEMU, boots a new
+The serial-workstation acceptance test saves a session to a FAT image, terminates QEMU, boots a new
 emulator process with only that storage restored, reloads the patch, and requires
 bit-identical PCM output.
 
@@ -159,7 +159,7 @@ Tessera includes MIDI/CV control paths, a master musical transport, tempo sync,
 arpeggiation, MPE/per-note expression, sample-accurate events, scene morphing, looping,
 audio-input graph nodes, multi-channel configuration, USB-audio support, and software
 sample-rate conversion. QEMU harnesses exercise these data paths; the corresponding
-physical CM4 audio-I/O acceptance is still part of M10.
+physical CM4 audio-I/O acceptance is still pending.
 
 ---
 
@@ -248,23 +248,25 @@ patch without recompiling a control program.
 
 ## Verification
 
-The most useful project-level gates are:
+Useful feature-level gates include:
 
 ```sh
-make -j1 test-arm-m11 CROSS_COMPILE=aarch64-linux-gnu-
-make -j1 test-arm-m12 CROSS_COMPILE=aarch64-linux-gnu-
-make -j1 test-arm-m13 CROSS_COMPILE=aarch64-linux-gnu-
-make -j1 test-arm-m11-m13 CROSS_COMPILE=aarch64-linux-gnu-
 make -j1 test-arm-temporal-all CROSS_COMPILE=aarch64-linux-gnu-
+make -j1 test-arm-resilience-qemu CROSS_COMPILE=aarch64-linux-gnu-
+make -j1 test-arm-shell-qemu CROSS_COMPILE=aarch64-linux-gnu-
+make -j1 test-arm-shell-graph-qemu CROSS_COMPILE=aarch64-linux-gnu-
+make -j1 test-arm-shell-patch-qemu CROSS_COMPILE=aarch64-linux-gnu-
+make -j1 test-arm-session-console CROSS_COMPILE=aarch64-linux-gnu-
 ```
 
 | Gate | What it proves |
 | --- | --- |
-| `test-arm-m11` | multicore admission, placement, real EL0 DSP capacity, cross-core graph equivalence, fault containment |
-| `test-arm-m12` | per-plugin accounting, timer-budget enforcement, hostile `hog` containment, good-plugin continuity |
-| `test-arm-m13` | shell safety, UART interleaving, console graph building, patch save/reload, two-process cold boot |
-| `test-arm-temporal-all` | temporal-contract model, races, lifecycle integration, real-EL0 QEMU acceptance |
+| `test-arm-temporal-all` | temporal contracts, admission, lifecycle races, timer enforcement, real-EL0 execution |
 | `test-arm-resilience-qemu` | MMU / kernel-write / illegal-SVC / CPU-hog containment with leak checks |
+| `test-arm-shell-qemu` | serial shell safety and shared-UART behavior |
+| `test-arm-shell-graph-qemu` | console graph construction and real plugin audio |
+| `test-arm-shell-patch-qemu` | console patch save/reload and identical output |
+| `test-arm-session-console` | managed multicore serial session, persistence, and true two-process cold boot |
 
 Host tests use sanitizers extensively, and dedicated race tests exercise the lock-free
 queues under ThreadSanitizer.
@@ -278,13 +280,12 @@ strict. Physical timing numbers must come from the board.
 
 ## Project status
 
-The core software milestones through M13 are complete under QEMU, and the M14 audio-input
-issues (#83-#85) are also closed with emulated capture/input/round-trip coverage. The
-repository additionally contains later SDK, synthesis, spectral-DSP, reliability, and
-resource-isolation work through the M15-M22 feature line.
+The software platform is broadly complete and heavily exercised under QEMU, including
+audio capture/input/round-trip coverage, multicore scheduling, temporal enforcement,
+persistent sessions, and the current SDK/DSP stack.
 
-The major unfinished milestone is **M10: prove the platform on real BCM2711 hardware**.
-The remaining tracked work is:
+The major unfinished work is **proving the platform on real BCM2711 hardware**.
+The remaining tracked hardware/integration work is:
 
 - [#105](https://github.com/KrasForge/Tessera/issues/105) — complete Pi 4 / CM4 boot,
   interrupt, serial, mailbox, and EMMC2/SD bring-up on real silicon;
@@ -299,8 +300,7 @@ Until those are done, Tessera should be read as a **working and heavily tested b
 audio architecture in emulation**, not as a finished CM4 product or a claim of measured
 hardware real-time performance.
 
-See [`MILESTONES.md`](MILESTONES.md) for milestone history and the `docs/` directory for
-acceptance details.
+See the `docs/` directory for design notes, acceptance evidence, and hardware plans.
 
 ---
 
@@ -327,7 +327,6 @@ docs/         ABI, hardware, shell, reliability, timing, and design references
 - **Plugin contract:** [`docs/plugin-abi.md`](docs/plugin-abi.md)
 - **SDK and DSP blocks:** [`sdk/README.md`](sdk/README.md)
 - **Serial workstation:** [`docs/shell.md`](docs/shell.md)
-- **Multicore/managed runtime:** [`docs/m11-m13-workstation.md`](docs/m11-m13-workstation.md)
 - **Temporal contracts:** [`docs/temporal-contracts.md`](docs/temporal-contracts.md)
 - **Fault containment demo:** [`docs/demo.md`](docs/demo.md)
 - **Reliability mechanisms:** [`docs/reliability.md`](docs/reliability.md)
