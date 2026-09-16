@@ -2261,8 +2261,8 @@ test-arm-sandbox-qemu: $(ARM_BUILD_DIR)/plugin_pass.elf \
 	  && echo "QEMU virt sandbox test PASSED" \
 	  || { echo "QEMU virt sandbox test FAILED"; exit 1; }
 
-# M8 capstone resilience demo on QEMU 'virt' (issue #36): load good/crash/evil
-# plugins into isolated sandboxes, run the graph, kill the two hostile plugins
+# M8/M12 capstone resilience demo on QEMU 'virt' (#36/#79): good/crash/evil/hog
+# plugins in isolated sandboxes, including partial-output mute and real death
 # mid-stream and confirm the good plugin + DAC keep producing audio, repeated
 # 10x with no leak.  This is the milestone's "done when" demo.
 VIRT_RES_ELF  = $(ARM_BUILD_DIR)/virt_resilience.elf
@@ -2388,13 +2388,13 @@ test-arm-multicore-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 # misses a callback; unloading everything (including the killed hog)
 # returns the frame allocator to baseline.  MMU on, two cores.
 VIRT_BUDGET_ELF  = $(ARM_BUILD_DIR)/virt_budget.elf
-VIRT_BUDGET_SRCS = $(VIRT_RES_SRCS) $(ARCH_ARM_DIR)/budget.c \
+VIRT_BUDGET_SRCS = $(VIRT_RES_SRCS) $(ARCH_ARM_DIR)/budget.c $(ARCH_ARM_DIR)/plugin_time.c \
                    $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
                    $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/audio_worker.c \
                    $(ARCH_ARM_DIR)/latency.c \
                    $(ARCH_ARM_DIR)/irq.c $(ARCH_ARM_DIR)/timer.c drivers/gic.c
 
-test-arm-budget-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
+build-arm-budget-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
                       $(ARM_BUILD_DIR)/plugin_blip.elf \
                       $(ARM_BUILD_DIR)/plugin_hog.elf
 	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/bg_start.o
@@ -2404,7 +2404,7 @@ test-arm-budget-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/plugin_trampoline.S -o $(ARM_BUILD_DIR)/bg_tramp.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(VIRT_DIR)/budget_blob.S          -o $(ARM_BUILD_DIR)/bg_blob.o
 	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/bg_uart.o
-	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/budget_main.c -o $(ARM_BUILD_DIR)/bg_main.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) $(TIMING_TEST_DEFS) -c $(VIRT_DIR)/budget_main.c -o $(ARM_BUILD_DIR)/bg_main.o
 	for s in $(VIRT_BUDGET_SRCS); do \
 	  o=$(ARM_BUILD_DIR)/bg_$$(basename $${s%.c}).o; \
 	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
@@ -2422,20 +2422,17 @@ test-arm-budget-qemu: $(ARM_BUILD_DIR)/plugin_good.elf \
 	    $(ARM_BUILD_DIR)/bg_graph_control.o $(ARM_BUILD_DIR)/bg_param_queue.o \
 	    $(ARM_BUILD_DIR)/bg_plugin_mgr.o $(ARM_BUILD_DIR)/bg_patch.o $(ARM_BUILD_DIR)/bg_vfs.o \
 	    $(ARM_BUILD_DIR)/bg_fat.o $(ARM_BUILD_DIR)/bg_sandbox.o \
-	    $(ARM_BUILD_DIR)/bg_string.o $(ARM_BUILD_DIR)/bg_budget.o \
+	    $(ARM_BUILD_DIR)/bg_string.o $(ARM_BUILD_DIR)/bg_budget.o $(ARM_BUILD_DIR)/bg_plugin_time.o \
 	    $(ARM_BUILD_DIR)/bg_smp.o $(ARM_BUILD_DIR)/bg_spsc_ring.o \
 	    $(ARM_BUILD_DIR)/bg_audio_core.o $(ARM_BUILD_DIR)/bg_audio_worker.o \
 	    $(ARM_BUILD_DIR)/bg_latency.o \
 	    $(ARM_BUILD_DIR)/bg_irq.o $(ARM_BUILD_DIR)/bg_timer.o \
 	    $(ARM_BUILD_DIR)/bg_gic.o
-	rm -f $(ARM_BUILD_DIR)/virt_budget.log
-	-timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 2 -m 256M \
-	    -display none -serial file:$(ARM_BUILD_DIR)/virt_budget.log -net none \
-	    -kernel $(VIRT_BUDGET_ELF) >/dev/null 2>&1
-	@cat $(ARM_BUILD_DIR)/virt_budget.log
-	@grep -q "BUDGET: PASS" $(ARM_BUILD_DIR)/virt_budget.log \
-	  && echo "QEMU virt budget-enforcement test PASSED" \
-	  || { echo "QEMU virt budget-enforcement test FAILED"; exit 1; }
+
+.PHONY: build-arm-budget-qemu test-arm-budget-qemu
+test-arm-budget-qemu: build-arm-budget-qemu
+	python3 scripts/run_qemu_timing.py --fixture budget --mode $(QEMU_TIMING_MODE) \
+	    --shift $(QEMU_ICOUNT_SHIFT) --repeat $(QEMU_TIMING_REPEATS) --build-dir $(ARM_BUILD_DIR)
 
 # Serial control shell on QEMU 'virt' (issue #80): the shell runs on CPU1
 # reading a real PL011 RX FIFO fed over `-serial stdio`, while CPU0 services
@@ -2909,7 +2906,7 @@ test-arm-ptime-qemu: | $(ARM_BUILD_DIR)
 	    $(ARM_BUILD_DIR)/pt_irq.o $(ARM_BUILD_DIR)/pt_timer.o \
 	    $(ARM_BUILD_DIR)/pt_gic.o
 	rm -f $(ARM_BUILD_DIR)/virt_ptime.log
-	-timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
 	    -display none -serial file:$(ARM_BUILD_DIR)/virt_ptime.log -net none \
 	    -kernel $(VIRT_PTIME_ELF) >/dev/null 2>&1
 	@cat $(ARM_BUILD_DIR)/virt_ptime.log
@@ -2921,18 +2918,24 @@ test-arm-ptime-qemu: | $(ARM_BUILD_DIR)
 # every callback (CNTPCT period + IRQ-to-thread wakeup) and publishes stats;
 # CPU1 renders the `audio_latency:` line over UART; CPU2 produces samples.
 # Proves the reporting does not corrupt the audio cadence (overruns stay zero).
+# QEMU timing experiments. Strict assertions are unchanged in every mode.
+QEMU_TIMING_MODE ?= deterministic
+QEMU_TIMING_REPEATS ?= 1
+QEMU_ICOUNT_SHIFT ?= 3
+TIMING_TEST_DEFS ?=
+
 VIRT_LAT_ELF  = $(ARM_BUILD_DIR)/virt_latency.elf
 VIRT_LAT_SRCS = $(ARCH_ARM_DIR)/smp.c $(ARCH_ARM_DIR)/spsc_ring.c \
                 $(ARCH_ARM_DIR)/audio_core.c $(ARCH_ARM_DIR)/latency.c \
                 $(ARCH_ARM_DIR)/exceptions.c $(ARCH_ARM_DIR)/irq.c \
                 $(ARCH_ARM_DIR)/timer.c drivers/gic.c
 
-test-arm-latency-qemu: | $(ARM_BUILD_DIR)
+build-arm-latency-qemu: | $(ARM_BUILD_DIR)
 	$(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $(VIRT_DIR)/start_virt.S -o $(ARM_BUILD_DIR)/lt_start.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/smp_entry.S -o $(ARM_BUILD_DIR)/lt_smpentry.o
 	$(ARM_CC) $(ARM_ASFLAGS) -c $(ARCH_ARM_DIR)/vectors.S   -o $(ARM_BUILD_DIR)/lt_vectors.o
 	$(ARM_CC) $(ARM_CFLAGS)  $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/lt_uart.o
-	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/latency_main.c -o $(ARM_BUILD_DIR)/lt_main.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) $(TIMING_TEST_DEFS) -c $(VIRT_DIR)/latency_main.c -o $(ARM_BUILD_DIR)/lt_main.o
 	for s in $(VIRT_LAT_SRCS); do \
 	  o=$(ARM_BUILD_DIR)/lt_$$(basename $${s%.c}).o; \
 	  $(ARM_CC) $(ARM_CFLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $$o || exit 1; \
@@ -2945,15 +2948,11 @@ test-arm-latency-qemu: | $(ARM_BUILD_DIR)
 	    $(ARM_BUILD_DIR)/lt_audio_core.o $(ARM_BUILD_DIR)/lt_latency.o \
 	    $(ARM_BUILD_DIR)/lt_exceptions.o $(ARM_BUILD_DIR)/lt_irq.o \
 	    $(ARM_BUILD_DIR)/lt_timer.o $(ARM_BUILD_DIR)/lt_gic.o
-	rm -f $(ARM_BUILD_DIR)/virt_latency.log
-	-timeout 60 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
-	    -display none -serial file:$(ARM_BUILD_DIR)/virt_latency.log -net none \
-	    -kernel $(VIRT_LAT_ELF) >/dev/null 2>&1
-	@cat $(ARM_BUILD_DIR)/virt_latency.log
-	@grep -q "AUDIO-LAT: PASS" $(ARM_BUILD_DIR)/virt_latency.log \
-	  && grep -q "audio_latency:" $(ARM_BUILD_DIR)/virt_latency.log \
-	  && echo "QEMU virt audio-latency test PASSED" \
-	  || { echo "QEMU virt audio-latency test FAILED"; exit 1; }
+
+.PHONY: build-arm-latency-qemu test-arm-latency-qemu
+test-arm-latency-qemu: build-arm-latency-qemu
+	python3 scripts/run_qemu_timing.py --fixture latency --mode $(QEMU_TIMING_MODE) \
+	    --shift $(QEMU_ICOUNT_SHIFT) --repeat $(QEMU_TIMING_REPEATS) --build-dir $(ARM_BUILD_DIR)
 
 arm-clean:
 	rm -rf $(ARM_BUILD_DIR)
@@ -2984,3 +2983,251 @@ test-arm-patch: | $(ARM_BUILD_DIR)
 	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
 	      -I$(ARCH_ARM_DIR) $(ARM_PATCH_TEST_SRCS) -o $(ARM_BUILD_DIR)/patch_test
 	$(ARM_BUILD_DIR)/patch_test
+
+# Complete M12 acceptance gate.  Keep execution serial even under make -j:
+# the QEMU fixtures share plugin ELF inputs and run timing-sensitive tests.
+.PHONY: test-arm-m12
+test-arm-m12:
+	$(MAKE) -j1 arm test-arm-budget test-arm-ptime test-arm-m2 \
+	    test-arm-worker test-arm-graph-control test-arm-latency \
+	    test-arm-budget-qemu test-arm-resilience-qemu test-arm-control-qemu \
+	    test-arm-ptime-qemu test-arm-latency-qemu
+
+
+# Frame-synchronous temporal contracts, policy, admission and concurrent handoff.
+.PHONY: test-arm-temporal
+test-arm-temporal: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined \
+	    -DHOSTTEST -I$(ARCH_ARM_DIR) tests/arm64/temporal_test.c \
+	    $(ARCH_ARM_DIR)/temporal.c $(ARCH_ARM_DIR)/audio_graph.c \
+	    -pthread -o $(ARM_BUILD_DIR)/temporal_test
+	$(ARM_BUILD_DIR)/temporal_test
+
+# Independently authored adversarial/property regressions are part of every
+# temporal host gate, including late contract updates across missed kicks.
+.PHONY: test-arm-temporal-review
+test-arm-temporal: test-arm-temporal-review
+test-arm-temporal-review: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined \
+	    -DHOSTTEST -I$(ARCH_ARM_DIR) tests/arm64/temporal_review_test.c \
+	    $(ARCH_ARM_DIR)/temporal.c $(ARCH_ARM_DIR)/audio_graph.c \
+	    -o $(ARM_BUILD_DIR)/temporal_review_test
+	$(ARM_BUILD_DIR)/temporal_review_test
+
+
+$(ARM_BUILD_DIR)/plugin_temporal_ctl.elf: plugins/test/temporal_ctl.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/temporal_ctl.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/temporal_ctl.o
+
+# Actual EL0 contracts on an exclusive CPU1 worker, with a CPU0 audio cadence.
+.PHONY: test-arm-temporal-qemu
+test-arm-temporal-qemu: $(ARM_BUILD_DIR)/plugin_good.elf $(ARM_BUILD_DIR)/plugin_blip.elf \
+                        $(ARM_BUILD_DIR)/plugin_hog.elf $(ARM_BUILD_DIR)/plugin_temporal_ctl.elf \
+                        $(ARM_BUILD_DIR)/plugin_trampoline_svc.elf
+	mkdir -p $(ARM_BUILD_DIR)/tc
+	set -e; for s in $(VIRT_BUDGET_SRCS) $(ARCH_ARM_DIR)/temporal.c $(ARCH_ARM_DIR)/temporal_host.c; do \
+	    $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s \
+	        -o $(ARM_BUILD_DIR)/tc/$$(basename $${s%.c}).o; \
+	done
+	set -e; for s in $(VIRT_DIR)/start_virt.S $(ARCH_ARM_DIR)/smp_entry.S \
+	    $(ARCH_ARM_DIR)/vectors.S $(ARCH_ARM_DIR)/entry.S \
+	    $(ARCH_ARM_DIR)/plugin_trampoline.S $(VIRT_DIR)/temporal_blob.S; do \
+	    $(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $$s \
+	        -o $(ARM_BUILD_DIR)/tc/$$(basename $${s%.S}).o; \
+	done
+	$(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/tc/uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -Iplugins -c $(VIRT_DIR)/temporal_main.c -o $(ARM_BUILD_DIR)/tc/main.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(ARM_BUILD_DIR)/virt_temporal.elf $(ARM_BUILD_DIR)/tc/*.o
+	timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 2 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/virt_temporal.log -net none \
+	    -kernel $(ARM_BUILD_DIR)/virt_temporal.elf
+	@cat $(ARM_BUILD_DIR)/virt_temporal.log
+	@grep -q '^TEMPORAL: PASS' $(ARM_BUILD_DIR)/virt_temporal.log
+
+# Independent acceptance using the production adapter and real EL0 plugins.
+# Separate object namespace permits running without touching legacy fixtures.
+VIRT_TC_ACCEPT_SRCS = $(VIRT_BUDGET_SRCS) $(ARCH_ARM_DIR)/temporal.c $(ARCH_ARM_DIR)/temporal_host.c
+.PHONY: test-arm-temporal-acceptance-qemu
+test-arm-temporal-acceptance-qemu: $(ARM_BUILD_DIR)/plugin_good.elf $(ARM_BUILD_DIR)/plugin_blip.elf $(ARM_BUILD_DIR)/plugin_hog.elf $(ARM_BUILD_DIR)/plugin_crash.elf
+	@mkdir -p $(ARM_BUILD_DIR)/temporal-acceptance
+	@set -e; for s in $(VIRT_DIR)/start_virt.S $(ARCH_ARM_DIR)/smp_entry.S $(ARCH_ARM_DIR)/vectors.S $(ARCH_ARM_DIR)/entry.S $(ARCH_ARM_DIR)/plugin_trampoline.S $(VIRT_DIR)/temporal_acceptance_blob.S; do \
+	  $(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $$s -o $(ARM_BUILD_DIR)/temporal-acceptance/$$(basename $${s%.S}).o; \
+	done
+	@set -e; for s in $(VIRT_TC_ACCEPT_SRCS) $(VIRT_DIR)/uart_virt.c $(VIRT_DIR)/temporal_acceptance_main.c; do \
+	  $(ARM_CC) -I$(ARCH_ARM_DIR) -Iplugins $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $(ARM_BUILD_DIR)/temporal-acceptance/$$(basename $${s%.c}).o; \
+	done
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(ARM_BUILD_DIR)/temporal-acceptance/kernel.elf $(ARM_BUILD_DIR)/temporal-acceptance/*.o
+	@rm -f $(ARM_BUILD_DIR)/temporal-acceptance/qemu.log
+	@timeout 40 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 2 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/temporal-acceptance/qemu.log -net none \
+	    -kernel $(ARM_BUILD_DIR)/temporal-acceptance/kernel.elf >$(ARM_BUILD_DIR)/temporal-acceptance/qemu.stderr 2>&1; \
+	    rc=$$?; cat $(ARM_BUILD_DIR)/temporal-acceptance/qemu.log; \
+	    test $$rc -eq 0 && grep -q 'TEMPORAL ACCEPTANCE: PASS' $(ARM_BUILD_DIR)/temporal-acceptance/qemu.log
+
+
+$(ARM_BUILD_DIR)/plugin_trampoline_svc.elf: plugins/test/trampoline_svc.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -I$(ARCH_ARM_DIR) -Iinclude -c $< -o $(ARM_BUILD_DIR)/trampoline_svc.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/trampoline_svc.o
+
+.PHONY: test-arm-temporal-all
+test-arm-temporal-all:
+	$(MAKE) -j1 arm test-arm-temporal test-arm-temporal-qemu test-arm-temporal-acceptance-qemu test-arm-worker-pause test-arm-graph-control test-arm-temporal-runtime-qemu
+
+.PHONY: test-arm-temporal-host-review
+test-arm-temporal: test-arm-temporal-host-review
+test-arm-temporal-host-review: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined \
+	    -DHOSTTEST -I$(ARCH_ARM_DIR) -Iinclude tests/arm64/temporal_host_review_test.c \
+	    $(ARCH_ARM_DIR)/temporal_host.c $(ARCH_ARM_DIR)/temporal.c \
+	    $(ARCH_ARM_DIR)/audio_graph.c $(ARCH_ARM_DIR)/graph_control.c $(ARCH_ARM_DIR)/audio_worker.c \
+	    -o $(ARM_BUILD_DIR)/temporal_host_review_test
+	$(ARM_BUILD_DIR)/temporal_host_review_test
+
+
+.PHONY: test-arm-worker-pause
+test-arm-worker-pause: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined \
+	    -DHOSTTEST -I$(ARCH_ARM_DIR) tests/arm64/worker_pause_test.c \
+	    $(ARCH_ARM_DIR)/audio_worker.c -pthread -o $(ARM_BUILD_DIR)/worker_pause_test
+	$(ARM_BUILD_DIR)/worker_pause_test
+
+$(ARM_BUILD_DIR)/plugin_lifecycle_%.elf: plugins/test/lifecycle_plugin.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -DHANG_STAGE=$* -Iinclude -c $< -o $(ARM_BUILD_DIR)/lifecycle_$*.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/lifecycle_$*.o
+
+$(ARM_BUILD_DIR)/plugin_live_temporal_ctl.elf: plugins/test/live_temporal_ctl.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -I$(ARCH_ARM_DIR) -Iplugins -c $< -o $(ARM_BUILD_DIR)/live_temporal_ctl.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/live_temporal_ctl.o
+
+.PHONY: test-arm-temporal-runtime-qemu
+test-arm-temporal-runtime-qemu: $(ARM_BUILD_DIR)/plugin_good.elf $(ARM_BUILD_DIR)/plugin_hog.elf \
+    $(ARM_BUILD_DIR)/plugin_live_temporal_ctl.elf $(addprefix $(ARM_BUILD_DIR)/plugin_lifecycle_,$(addsuffix .elf,0 1 2 3 4))
+	mkdir -p $(ARM_BUILD_DIR)/temporal-runtime
+	set -e; for s in $(VIRT_BUDGET_SRCS) $(ARCH_ARM_DIR)/temporal.c $(ARCH_ARM_DIR)/temporal_host.c $(ARCH_ARM_DIR)/temporal_runtime.c; do \
+	    $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s \
+	        -o $(ARM_BUILD_DIR)/temporal-runtime/$$(basename $${s%.c}).o; \
+	done
+	set -e; for s in $(VIRT_DIR)/start_virt.S $(ARCH_ARM_DIR)/smp_entry.S \
+	    $(ARCH_ARM_DIR)/vectors.S $(ARCH_ARM_DIR)/entry.S \
+	    $(ARCH_ARM_DIR)/plugin_trampoline.S $(VIRT_DIR)/temporal_runtime_blob.S; do \
+	    $(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $$s \
+	        -o $(ARM_BUILD_DIR)/temporal-runtime/$$(basename $${s%.S}).o; \
+	done
+	$(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/temporal-runtime/uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -Iplugins -c $(VIRT_DIR)/temporal_runtime_main.c -o $(ARM_BUILD_DIR)/temporal-runtime/main.o
+	$(ARM_LD) -T $(VIRT_DIR)/virt_mmu.ld -o $(ARM_BUILD_DIR)/temporal-runtime/kernel.elf $(ARM_BUILD_DIR)/temporal-runtime/*.o
+	timeout 45 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/temporal-runtime/run.log -net none \
+	    -kernel $(ARM_BUILD_DIR)/temporal-runtime/kernel.elf
+	@cat $(ARM_BUILD_DIR)/temporal-runtime/run.log
+	@grep -q '^RUNTIME: PASS' $(ARM_BUILD_DIR)/temporal-runtime/run.log
+
+
+.PHONY: test-arm-timing-runner test-arm-timing-stability test-arm-timing-wallclock
+test-arm-timing-runner:
+	python3 tests/test_qemu_timing_runner.py
+
+# All twenty executions must pass. A failure is never retried or discarded.
+test-arm-timing-stability:
+	$(MAKE) -j1 test-arm-budget-qemu test-arm-latency-qemu QEMU_TIMING_MODE=deterministic QEMU_TIMING_REPEATS=20
+
+# Host-scheduled observation, NOT hardware WCET. Same strict acceptance checks.
+test-arm-timing-wallclock:
+	$(MAKE) -j1 test-arm-budget-qemu test-arm-latency-qemu QEMU_TIMING_MODE=wallclock
+
+.PHONY: test-arm-timing-negative test-arm-m12-complete
+test-arm-timing-negative:
+	python3 scripts/test_qemu_timing_negative.py --cross $(CROSS_COMPILE)
+
+# Whole stabilization acceptance, serial to avoid shared plugin build outputs.
+test-arm-m12-complete:
+	$(MAKE) -j1 test-arm-timing-runner test-arm-user-qemu test-arm-m12 \
+	    test-arm-temporal-all test-arm-sandbox-qemu test-arm-fault-qemu \
+	    test-arm-timing-negative test-arm-timing-stability
+
+
+.PHONY: test-arm-temporal-multicore
+test-arm-temporal-multicore: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined \
+	    -DHOSTTEST -I$(ARCH_ARM_DIR) tests/arm64/temporal_multicore_test.c \
+	    $(ARCH_ARM_DIR)/temporal_multicore.c $(ARCH_ARM_DIR)/temporal.c \
+	    $(ARCH_ARM_DIR)/audio_worker.c $(ARCH_ARM_DIR)/audio_graph.c \
+	    -pthread -o $(ARM_BUILD_DIR)/temporal_multicore_test
+	$(ARM_BUILD_DIR)/temporal_multicore_test
+
+
+.PHONY: test-arm-session-codec
+test-arm-session-codec: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -O1 -fsanitize=address,undefined \
+	    -DHOSTTEST -I$(ARCH_ARM_DIR) tests/arm64/session_codec_test.c \
+	    $(ARCH_ARM_DIR)/session_preset.c $(ARCH_ARM_DIR)/patch.c $(ARCH_ARM_DIR)/shell.c \
+	    $(ARCH_ARM_DIR)/shell_graph.c $(ARCH_ARM_DIR)/temporal_multicore.c \
+	    $(ARCH_ARM_DIR)/temporal.c $(ARCH_ARM_DIR)/audio_worker.c $(ARCH_ARM_DIR)/audio_graph.c \
+	    -o $(ARM_BUILD_DIR)/session_codec_test
+	$(ARM_BUILD_DIR)/session_codec_test
+
+
+$(ARM_BUILD_DIR)/plugin_session_source.elf: plugins/test/session_probe.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -Iinclude -c $< -o $(ARM_BUILD_DIR)/session_source.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/session_source.o
+$(ARM_BUILD_DIR)/plugin_session_gain.elf: plugins/test/session_probe.c $(PLUGIN_LD) | $(ARM_BUILD_DIR)
+	$(ARM_CC) $(PLUGIN_CFLAGS) -DPROBE_GAIN=1 -Iinclude -c $< -o $(ARM_BUILD_DIR)/session_gain.o
+	$(ARM_LD) -T $(PLUGIN_LD) -o $@ $(ARM_BUILD_DIR)/session_gain.o
+
+SESSION_SRCS = $(VIRT_BUDGET_SRCS) $(ARCH_ARM_DIR)/temporal.c $(ARCH_ARM_DIR)/temporal_multicore.c \
+    $(ARCH_ARM_DIR)/audio_session.c $(ARCH_ARM_DIR)/session_preset.c \
+    $(ARCH_ARM_DIR)/shell.c $(ARCH_ARM_DIR)/shell_graph.c $(ARCH_ARM_DIR)/session_shell.c
+SESSION_DEFS ?=
+.PHONY: build-arm-session test-arm-session-qemu run-arm-workstation
+build-arm-session: $(ARM_BUILD_DIR)/plugin_session_source.elf $(ARM_BUILD_DIR)/plugin_session_gain.elf \
+    $(ARM_BUILD_DIR)/plugin_hog.elf $(ARM_BUILD_DIR)/plugin_good.elf
+	mkdir -p $(ARM_BUILD_DIR)/session
+	set -e; for s in $(SESSION_SRCS); do \
+	    $(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $$s -o $(ARM_BUILD_DIR)/session/$$(basename $${s%.c}).o; \
+	done
+	set -e; for s in $(VIRT_DIR)/start_virt.S $(ARCH_ARM_DIR)/smp_entry.S $(ARCH_ARM_DIR)/vectors.S \
+	    $(ARCH_ARM_DIR)/entry.S $(ARCH_ARM_DIR)/plugin_trampoline.S $(VIRT_DIR)/session_blob.S; do \
+	    $(ARM_CC) $(ARM_ASFLAGS) -I$(ARCH_ARM_DIR) -c $$s -o $(ARM_BUILD_DIR)/session/$$(basename $${s%.S}).o; \
+	done
+	$(ARM_CC) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) -c $(VIRT_DIR)/uart_virt.c -o $(ARM_BUILD_DIR)/session/uart.o
+	$(ARM_CC) -I$(ARCH_ARM_DIR) $(ARM_CFLAGS) $(VIRT_MMU_FLAGS) $(VIRT_GIC_FLAGS) $(SESSION_DEFS) -c $(VIRT_DIR)/session_main.c -o $(ARM_BUILD_DIR)/session/main.o
+	$(ARM_LD) -T $(VIRT_DIR)/session.ld -o $(ARM_BUILD_DIR)/session/kernel.elf $(ARM_BUILD_DIR)/session/*.o
+
+test-arm-session-qemu:
+	$(MAKE) -j1 build-arm-session SESSION_DEFS="-DSESSION_AUTOTEST -DSESSION_FRAMES=240"
+	timeout 45 qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial file:$(ARM_BUILD_DIR)/session/acceptance.log -net none \
+	    -kernel $(ARM_BUILD_DIR)/session/kernel.elf
+	@cat $(ARM_BUILD_DIR)/session/acceptance.log
+	@grep -q '^SESSION: PASS' $(ARM_BUILD_DIR)/session/acceptance.log
+
+run-arm-workstation: build-arm-session
+	qemu-system-aarch64 -machine virt -cpu cortex-a72 -smp 4 -m 256M \
+	    -display none -serial stdio -monitor none -net none -kernel $(ARM_BUILD_DIR)/session/kernel.elf
+
+.PHONY: test-arm-session-console
+test-arm-session-console:
+	$(MAKE) -j1 build-arm-session SESSION_DEFS=
+	python3 scripts/test_session_console.py --build-dir $(ARM_BUILD_DIR)
+
+
+SESSION_HOST_SRCS = tests/arm64/session_concurrency_test.c $(ARCH_ARM_DIR)/audio_session.c \
+    $(ARCH_ARM_DIR)/temporal_multicore.c $(ARCH_ARM_DIR)/temporal.c \
+    $(ARCH_ARM_DIR)/audio_worker.c $(ARCH_ARM_DIR)/audio_graph.c $(ARCH_ARM_DIR)/graph_control.c \
+    $(ARCH_ARM_DIR)/param_queue.c $(ARCH_ARM_DIR)/session_preset.c $(ARCH_ARM_DIR)/patch.c \
+    $(ARCH_ARM_DIR)/vfs.c $(ARCH_ARM_DIR)/fat.c
+.PHONY: test-arm-session-concurrency
+test-arm-session-concurrency: | $(ARM_BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
+	    -DHOSTTEST -I$(ARCH_ARM_DIR) -Iinclude $(SESSION_HOST_SRCS) -pthread \
+	    -o $(ARM_BUILD_DIR)/session_concurrency_test
+	$(ARM_BUILD_DIR)/session_concurrency_test
+
+
+# M11/M13 acceptance uses the same engine as run-arm-workstation. Keep the
+# auto-capacity and interactive variants serial: they share plugin ELFs.
+.PHONY: test-arm-m11-m13
+test-arm-m11-m13:
+	$(MAKE) -j1 arm test-arm-temporal-multicore test-arm-session-codec \
+	    test-arm-session-concurrency test-arm-shell test-arm-shell-graph test-arm-patch \
+	    test-arm-session-qemu test-arm-session-console

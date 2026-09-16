@@ -12,6 +12,8 @@ void shell_init(shell_t *sh, const shell_cmd_t *cmds, int n_cmds,
     sh->ctx        = 0;
     sh->prompt     = 0;
     sh->len        = 0;
+    sh->overflow   = 0;
+    sh->last_result = 0;
     sh->swallow_lf = 0;
     sh->line[0]    = '\0';
 }
@@ -75,7 +77,7 @@ static void write_int(shell_t *sh, int v)
 {
     char  buf[12];
     int   n = 0;
-    unsigned u = (v < 0) ? (unsigned)(-v) : (unsigned)v;
+    unsigned u = (v < 0) ? (0u - (unsigned)v) : (unsigned)v;
     if (v < 0)
         shell_write(sh, "-");
     do {
@@ -127,10 +129,16 @@ int shell_dispatch(shell_t *sh, int argc, char **argv)
 /* Tokenise the current buffer and dispatch it, then reset for the next line. */
 static int run_line(shell_t *sh)
 {
-    char *argv[SHELL_MAX_ARGS];
+    char *argv[SHELL_MAX_ARGS + 1];
     sh->line[sh->len] = '\0';
-    int argc = shell_tokenize(sh->line, argv, SHELL_MAX_ARGS);
-    int r = shell_dispatch(sh, argc, argv);
+    int argc = shell_tokenize(sh->line, argv, SHELL_MAX_ARGS + 1);
+    int r;
+    if (sh->overflow || argc > SHELL_MAX_ARGS) {
+        shell_write(sh, "error: command too long; nothing executed\r\n");
+        r = SHELL_EOVERFLOW;
+    } else r = shell_dispatch(sh, argc, argv);
+    sh->last_result = r;
+    sh->overflow = 0;
     sh->len = 0;
     shell_prompt(sh);
     return r;
@@ -165,8 +173,10 @@ int shell_feed(shell_t *sh, char c)
      * input can corrupt the buffer or the terminal. */
     if ((unsigned char)c < 0x20 || (unsigned char)c > 0x7e)
         return 0;
-    if (sh->len >= SHELL_LINE_MAX - 1)
+    if (sh->len >= SHELL_LINE_MAX - 1) {
+        sh->overflow = 1;
         return 0;
+    }
 
     sh->line[sh->len++] = c;
     char echo[2] = { c, '\0' };

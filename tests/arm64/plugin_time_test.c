@@ -133,6 +133,11 @@ static void test_board(void)
     __atomic_store_n(&b.seq, b.seq + 1u, __ATOMIC_RELEASE);
     CHECK(pt_snapshot(&b, snap, AW_MAX_NODES, 8) == 1, "settles once even");
 
+    CHECK(pt_snapshot(&b, 0, 1, 8) == -1, "null output rejected");
+    CHECK(pt_snapshot(&b, snap, -1, 8) == -1, "negative capacity rejected");
+    CHECK(pt_snapshot(&b, 0, 0, 8) == 0, "zero-capacity snapshot is safe");
+    CHECK(pt_snapshot(&b, snap, AW_MAX_NODES, 0) == -1, "retry bound enforced");
+
     /* Overrun attribution flows through to the board. */
     clk_script(script, 2);
     aw_kick(&w, 2);                           /* published, not yet run   */

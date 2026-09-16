@@ -39,7 +39,8 @@
 #include "plugin_mgr.h"
 #include "graph_control.h"
 #include "ring_contract.h"
-#include "budget.h"
+#include "budget_plugin.h"
+#include "m12_finish.h"
 #include "gic.h"
 #include "timer.h"
 #include "latency.h"
@@ -74,7 +75,7 @@ static void  ring_unmap(void *c, uint32_t p, void *r, int i){ (void)c;(void)p;(v
 static graph_control_t g_gc;
 static plugin_mgr_t    g_pm;
 
-#define TOTAL_BLOCKS  6u
+#define TOTAL_BLOCKS  8u
 #define TRIGGER_BLOCK 3u          /* fire the hostile plugins here ("3 s") */
 
 /* Give a loaded plugin its de-interleaved input/output buffers and return the
@@ -134,7 +135,7 @@ static int demo_pass(void)
     float *good_out = map_io(good);
     map_io(crash);
     map_io(evil);
-    map_io(hog);
+    float *hog_out = map_io(hog);
 
     if (plugin_call_init(good, RING_SR, RING_BLOCK) != TESSERA_PLUGIN_OK ||
         plugin_call_init(hog,  RING_SR, RING_BLOCK) != TESSERA_PLUGIN_OK)
@@ -144,7 +145,10 @@ static int demo_pass(void)
     budget_t hog_pol;
     budget_init(&hog_pol, g_hog_budget, 3);
     uint32_t hog_preempts = 0, hog_muted = 0;
-    uint64_t dt_min = ~0ull;
+    uint64_t dt_min = ~0ull, dt_max = 0;
+    uint32_t hog_audible = 0, hog_liveness = 0, mute_leaks = 0;
+    process_set_liveness(hog->proc, &hog_liveness);
+    gc_set_budget(&g_gc, (uint32_t)hpid, g_hog_budget);
     int kill_logged = 0;
 
     uint32_t sound_blocks = 0;
@@ -166,33 +170,44 @@ static int demo_pass(void)
             evil_killed  = (run_block(evil)  == -1);
         }
 
-        /* From the trigger on, the hog runs every block under its budget: it
-         * never returns on its own - only the budget timer gets it back. */
-        if (b >= TRIGGER_BLOCK && !hog_pol.killed) {
-            uint64_t t0 = rd_cntpct();
-            budget_arm(hog_pol.cycles);
-            long r = run_block(hog);
-            budget_disarm();
-            uint64_t dt = rd_cntpct() - t0;
-
-            int over = (r == BUDGET_PREEMPTED);
-            if (over) {
-                hog_preempts++;
-                if (dt < dt_min)
-                    dt_min = dt;
-            }
-            int act = budget_account(&hog_pol, over);
-            if (act == BUDGET_MUTE)
-                hog_muted++;            /* the host emits silence downstream */
-            if (act == BUDGET_KILL && !kill_logged) {
-                kill_logged = 1;
-                uart_printf("  [budget] kill pid=%u (hog) after %u consecutive offences (last=%uus budget=%uus)\r\n",
-                            (unsigned)hpid, (unsigned)hog_pol.streak,
-                            (unsigned)lat_cyc_to_us(dt, g_freq),
-                            (unsigned)lat_cyc_to_us(hog_pol.cycles, g_freq));
-            }
+        /* Run the adversary from the start: it dirties output then starts
+         * spinning at TRIGGER_BLOCK.  The actual kernel executor must mute
+         * those writes and publish death, not just count a policy verdict. */
+        hog_pol.cycles = gc_budget(&g_gc, (uint32_t)hpid);
+        budget_plugin_call_t call = {
+            hog, IN_L_VA, IN_R_VA, OUT_L_VA, OUT_R_VA,
+            hog_out, hog_out + RING_BLOCK, RING_BLOCK
+        };
+        uint64_t dt, before = hog_pol.offences;
+        int act = budget_plugin_run(&hog_pol, &call, &dt);
+        if (hog_pol.offences != before) {
+            hog_preempts++;
+            if (dt < dt_min) dt_min = dt;
+            if (dt > dt_max) dt_max = dt;
         }
+        if (act == BUDGET_OK && block_has_sound(hog_out)) hog_audible++;
+        if (act != BUDGET_OK && block_has_sound(hog_out)) mute_leaks++;
+        if (act == BUDGET_MUTE) hog_muted++;
+        if (act == BUDGET_KILL) kill_logged = 1;
     }
+
+    int dead = hog->proc->state == PROC_KILLED &&
+               hog_liveness == PROC_LIVENESS_DEAD && run_block(hog) == -1;
+    uart_printf("  [budget] kill pid=%u (hog) after %u consecutive offences (max=%uus budget=%uus) dead=%d mute-leaks=%u\r\n",
+                (unsigned)hpid, (unsigned)hog_pol.streak,
+                (unsigned)lat_cyc_to_us(dt_max, g_freq),
+                (unsigned)lat_cyc_to_us(hog_pol.cycles, g_freq),
+                dead, (unsigned)mute_leaks);
+
+    /* A fresh evil process selects its kernel-write attack.  The old demo's
+     * write followed an already-fatal SVC and was never executed. */
+    pm_unload(&g_pm, (uint32_t)epid);
+    epid = pm_load(&g_pm, "evil");
+    if (epid <= 0) return 0;
+    evil = pm_plugin(&g_pm, (uint32_t)epid);
+    map_io(evil);
+    int wild_killed = plugin_call_init(evil, 0, RING_BLOCK) == TESSERA_PLUGIN_OK &&
+                      run_block(evil) == -1 && evil->proc->state == PROC_KILLED;
 
     pm_unload(&g_pm, (uint32_t)gpid);
     pm_unload(&g_pm, (uint32_t)cpid);
@@ -203,10 +218,11 @@ static int demo_pass(void)
      * boundary every time (it never returns on its own; dt_min proves the
      * budget did it), muted on the first two offences, killed on the third. */
     int hog_ok = (hog_preempts == 3) && (hog_muted == 2) &&
-                 hog_pol.killed && kill_logged &&
-                 (dt_min >= g_hog_budget) && (dt_min < 3 * g_hog_budget);
+                 hog_pol.killed && kill_logged && dead && !mute_leaks &&
+                 hog_audible == TRIGGER_BLOCK && gc_budget(&g_gc, (uint32_t)hpid) == 0 &&
+                 (dt_min >= g_hog_budget) && (dt_max < 4 * g_hog_budget);
 
-    return (sound_blocks == TOTAL_BLOCKS) && crash_killed && evil_killed &&
+    return (sound_blocks == TOTAL_BLOCKS) && crash_killed && evil_killed && wild_killed &&
            hog_ok;
 }
 
@@ -243,7 +259,7 @@ void test_main(void)
 
     int passes = 0;
     for (int i = 0; i < 10; i++) {
-        int ok = demo_pass();
+        int ok = demo_pass() && pmm_free_pages() == baseline;
         if (ok) passes++;
         uart_printf("  run %d: good-audio-intact + all-three-neutralised = %s\r\n",
                     i + 1, ok ? "yes" : "NO");
@@ -257,6 +273,5 @@ void test_main(void)
     uart_puts((passes == 10 && no_leak) ? "RESILIENCE: PASS\r\n"
                                         : "RESILIENCE: FAIL\r\n");
 
-    for (;;)
-        __asm__ volatile("wfe");
+    m12_finish();
 }

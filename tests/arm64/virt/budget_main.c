@@ -10,7 +10,7 @@
  *          in budget enforcement:
  *            good - renders audio; never trips its budget.
  *            blip - spins forever on its 3rd and 4th blocks, then behaves.
- *            hog  - spins forever in every process_block.
+ *            hog  - produces three blocks, then dirties output and spins.
  *
  * Every budgeted call arms the worker core's generic timer for the plugin's
  * budget and opens the EL0 IRQ window; a plugin still running at the budget
@@ -19,11 +19,9 @@
  * period - and the escalation policy applies.  hog collects 3 consecutive
  * offences (mute, mute, kill) and is removed; blip collects 2, is muted
  * twice, is forgiven on its clean block, and is audibly back; good never
- * offends.  Throughout, CPU0 services every callback and the DAC never
- * starves beyond the usual QEMU tolerance.  (The watchdog allowance of one
- * overrun per [budget] banner is the same QEMU UART/BQL artifact as in the
- * multicore harness - each banner is UART MMIO from CPU1 under QEMU's
- * global lock; the allowance on hardware is zero.)  Unloading everything
+ * offends.  Throughout, CPU0 services every callback with zero worker skips,
+ * underruns or watchdog allowances.  Preemption does no UART I/O; reports
+ * are printed only after workers drain.  Unloading everything
  * returns the frame allocator to its baseline: a budget kill leaks nothing.
  *
  * Budgets come from the control plane (gc_set_budget); a plugin with none
@@ -43,7 +41,9 @@
 #include "plugin_mgr.h"
 #include "graph_control.h"
 #include "ring_contract.h"
-#include "budget.h"
+#include "budget_plugin.h"
+#include "m12_finish.h"
+#include "plugin_time.h"
 #include "smp.h"
 #include "spsc_ring.h"
 #include "audio_core.h"
@@ -76,8 +76,8 @@ static uint64_t rd_cntpct(void)
 #define BLOCKS       100u
 #define N_NODES      3u
 #define KILL_AFTER   3u
-#define TOL          15u               /* worker-lateness slack (TCG)       */
-#define WD_ALLOW     8u                /* one per [budget] banner (QEMU BQL) */
+#define TOL          0u               /* no missed blocks permitted        */
+#define WD_ALLOW     0u                /* no watchdog allowance             */
 
 /* ---- plugin plumbing (M8 machinery) ---- */
 static void *ring_new(void *c)                              { (void)c; return (void *)0; }
@@ -125,6 +125,7 @@ static void block_clear(float *out)
 
 /* ---- the budgeted node wrapper (the host's enforcement point) ---- */
 static audio_worker_t g_w;
+static pt_board_t g_pt;
 static spsc_ring_t    g_dac_ring;
 static int16_t        g_dac_buf[4096];
 static int16_t        g_dma[SAMPLES];
@@ -141,6 +142,8 @@ typedef struct {
     volatile uint32_t muted;      /* blocks silenced by policy             */
     volatile uint32_t audible;    /* blocks that produced verified sound   */
     volatile uint32_t kill_logged;
+    volatile uint32_t mute_leaks;
+    uint32_t liveness;
     uint64_t    preempt_min;      /* shortest preempted run (cycles)       */
     uint64_t    preempt_max;      /* longest preempted run (cycles)        */
 } bnode_t;
@@ -155,40 +158,36 @@ static void node_budgeted(void *ctx)
     if (n->pol.killed)
         return;                        /* removed from service             */
 
+#ifdef TIMING_INJECT_WORKER_DELAY
+    /* Negative control: delay outside the plugin budget once. A real
+     * missed worker release must still fail the strict acceptance check. */
+    if (n->to_dac && n->runs == 31) {
+        uint64_t start = rd_cntpct();
+        while (rd_cntpct() - start < 2u * (g_freq / BLOCK_HZ)) { }
+    }
+#endif
     n->runs++;
     block_clear(n->out);
 
-    uint64_t t0 = rd_cntpct();
-    budget_arm(n->pol.cycles);
-    long r = run_block(n->pl);
-    budget_disarm();
-    uint64_t dt = rd_cntpct() - t0;
-
-    int over = (r == BUDGET_PREEMPTED);
-    if (over) {
-        if (n->preempt_min == 0 || dt < n->preempt_min)
-            n->preempt_min = dt;
-        if (dt > n->preempt_max)
-            n->preempt_max = dt;
+    /* Resolve every block: control changes take effect without resetting
+     * strike history, and zero always means the fair-share default. */
+    uint64_t configured = gc_budget(&g_gc, n->pl->proc->pid);
+    n->pol.cycles = configured ? configured : budget_fair_share(g_freq / BLOCK_HZ, N_NODES);
+    budget_plugin_call_t call = {
+        n->pl, IN_L_VA, IN_R_VA, OUT_L_VA, OUT_R_VA,
+        n->out, n->out + RING_BLOCK, RING_BLOCK
+    };
+    uint64_t dt, before = n->pol.offences;
+    int act = budget_plugin_run(&n->pol, &call, &dt);
+    if (n->pol.offences != before) {
+        if (!n->preempt_min || dt < n->preempt_min) n->preempt_min = dt;
+        if (dt > n->preempt_max) n->preempt_max = dt;
     }
-
-    int act = budget_account(&n->pol, over);
-    g_w.nodes[n->slot].offences = n->pol.offences;   /* stats line (#77)  */
-
-    if (act == BUDGET_KILL) {
-        if (!n->kill_logged) {
-            n->kill_logged = 1;
-            uart_printf("  [budget] kill pid=%u (%s) after %u consecutive offences (last=%uus budget=%uus)\r\n",
-                        (unsigned)n->pl->proc->pid, n->name,
-                        (unsigned)n->pol.streak,
-                        (unsigned)lat_cyc_to_us(dt, g_freq),
-                        (unsigned)lat_cyc_to_us(n->pol.cycles, g_freq));
-        }
+    g_w.nodes[n->slot].offences = n->pol.offences;
+    if (act != BUDGET_OK) {
         n->muted++;
-        return;                        /* output stays silent              */
-    }
-    if (act == BUDGET_MUTE) {
-        n->muted++;                    /* offence: silence downstream      */
+        if (block_has_sound(n->out)) n->mute_leaks++;
+        if (act == BUDGET_KILL) n->kill_logged = 1; /* report off the worker */
         return;
     }
 
@@ -269,7 +268,10 @@ void test_main(void)
         for (;;) __asm__ volatile("wfe");
     }
     /* pm_load registered each pid with the graph, so budgets can be set. */
-    uint64_t hard_budget = interval / 3u;              /* ~333 us          */
+    /* Reserve at least 1/6 of the frame for entry/exit, IRQ delivery and
+     * publication even if good consumes its entire 1/3 fair-share budget.
+     * Three budgets summing to the full frame left no kernel allowance. */
+    uint64_t hard_budget = interval / 4u;              /* 250 us at 1 kHz */
     int sb = gc_set_budget(&g_gc, (uint32_t)bpid, hard_budget);
     int sh = gc_set_budget(&g_gc, (uint32_t)hpid, hard_budget);
 
@@ -280,6 +282,7 @@ void test_main(void)
     g_blip.out = map_io(g_blip.pl);
     g_hog.out  = map_io(g_hog.pl);
     g_good.to_dac = 1;
+    process_set_liveness(g_hog.pl->proc, &g_hog.liveness);
 
     if (plugin_call_init(g_good.pl, RING_SR, RING_BLOCK) != TESSERA_PLUGIN_OK ||
         plugin_call_init(g_blip.pl, RING_SR, RING_BLOCK) != TESSERA_PLUGIN_OK ||
@@ -299,6 +302,9 @@ void test_main(void)
 
     /* One worker on CPU1; nodes in fixed order, tagged for the stats line. */
     aw_init(&g_w, 1);
+    pt_board_init(&g_pt);
+    g_w.publish = pt_publish;
+    g_w.pub_ctx = &g_pt;
     g_w.clock = rd_cntpct;             /* issue #77 accounting stays on    */
     g_good.slot = aw_assign(&g_w, node_budgeted, &g_good);
     g_blip.slot = aw_assign(&g_w, node_budgeted, &g_blip);
@@ -339,7 +345,24 @@ void test_main(void)
     while (!aw_drained(&g_w) && rd_cntpct() - start < g_freq)
         ;
     int drained = aw_drained(&g_w);
+    int worker_was_online = g_w.online;
     aw_stop(&g_w);
+
+    int dead = g_hog.pl->proc->state == PROC_KILLED &&
+               g_hog.liveness == PROC_LIVENESS_DEAD;
+    int no_resurrection = dead && run_block(g_hog.pl) == -1;
+    pt_entry_t snapshot[AW_MAX_NODES];
+    int reported = pt_snapshot(&g_pt, snapshot, AW_MAX_NODES, 8);
+    for (int i = 0; i < reported; i++) {
+        char line[192];
+        pt_render(&snapshot[i], i == 0 ? "good" : i == 1 ? "blip" : "hog",
+                  g_freq, line, sizeof line);
+        uart_puts(line); uart_puts("\r\n");
+    }
+    uart_printf("  [budget] kill pid=%u (hog) offences=%u max=%uus budget=%uus dead=%d\r\n",
+                (unsigned)hpid, (unsigned)g_hog.pol.offences,
+                (unsigned)lat_cyc_to_us(g_hog.preempt_max, g_freq),
+                (unsigned)lat_cyc_to_us(g_hog.pol.cycles, g_freq), dead);
 
     /* Unload everything - including the budget-killed hog: leak-free. */
     pm_unload(&g_pm, (uint32_t)gpid);
@@ -374,7 +397,7 @@ void test_main(void)
                 (unsigned)baseline, (unsigned)after, no_leak);
 
     /* ---- checks ---- */
-    int online   = (e1 == 0) && g_w.online;
+    int online   = (e1 == 0) && worker_was_online;
     int ctl_ok   = (sb == GC_OK) && (sh == GC_OK) &&
                    (g_blip.pol.cycles == hard_budget) &&
                    (g_good.pol.cycles == fair);
@@ -384,32 +407,32 @@ void test_main(void)
                    (g_w.overruns <= TOL) && drained;
     /* hog: three consecutive offences - mute, mute, kill - then removed. */
     int hog_ok   = g_hog.pol.killed && (g_hog.pol.offences == KILL_AFTER) &&
-                   (g_hog.runs == KILL_AFTER) && (g_hog.muted == KILL_AFTER) &&
-                   g_hog.kill_logged;
+                   (g_hog.runs == 3u + KILL_AFTER) && (g_hog.muted == KILL_AFTER) &&
+                   g_hog.kill_logged && dead && no_resurrection &&
+                   g_hog.mute_leaks == 0 && g_hog.audible == 3;
     /* blip: two offences, forgiven, audibly back, never killed. */
     int blip_ok  = !g_blip.pol.killed && (g_blip.pol.offences == 2) &&
                    (g_blip.muted == 2) && (g_blip.runs >= 5) &&
-                   (g_blip.audible == g_blip.runs - 2);
+                   (g_blip.audible == g_blip.runs - 2) && !g_blip.mute_leaks;
     /* good: audio every run, zero offences - well-behaved plugins see no
      * behaviour change. */
     int good_ok  = (g_good.pol.offences == 0) && (g_good.muted == 0) &&
-                   (g_good.audible == g_good.runs) && (g_good.runs > 0);
+                   (g_good.audible == g_good.runs) && (g_good.runs == BLOCKS);
     /* Preemption happened at the budget boundary, mid-block: every
      * preempted run measures at or above the budget and clearly below the
      * block period. */
     int preempt_ok = (g_hog.preempt_min >= hard_budget) &&
-                     (g_hog.preempt_min < interval) &&
+                     (g_hog.preempt_max < interval) &&
                      (g_blip.preempt_min >= hard_budget) &&
-                     (g_blip.preempt_min < interval);
+                     (g_blip.preempt_max < interval);
 
     uart_printf("checks: online=%d ctl=%d cpu0=%d worker=%d hog=%d blip=%d good=%d preempt=%d no-leak=%d\r\n",
                 online, ctl_ok, cpu0_ok, w_ok, hog_ok, blip_ok, good_ok,
                 preempt_ok, no_leak);
 
     int ok = online && ctl_ok && cpu0_ok && w_ok && hog_ok && blip_ok &&
-             good_ok && preempt_ok && no_leak;
+             good_ok && preempt_ok && no_leak && reported == N_NODES;
     uart_puts(ok ? "BUDGET: PASS\r\n" : "BUDGET: FAIL\r\n");
 
-    for (;;)
-        __asm__ volatile("wfe");
+    m12_finish();
 }
