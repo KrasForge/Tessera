@@ -22,15 +22,17 @@ static int g_fail;
     } while (0)
 
 /* Mock ring backend: hand out distinct non-NULL tokens and count operations. */
-static int g_new, g_del, g_map, g_unmap;
+static int g_new, g_del, g_map, g_unmap, fail_map;
 static uintptr_t g_token = 0x1000;
 
 static void *mock_new(void *ctx)   { (void)ctx; g_new++; return (void *)(g_token += 0x1000); }
 static void  mock_del(void *ctx, void *r) { (void)ctx; (void)r; g_del++; }
 static int   mock_map(void *ctx, uint32_t pid, void *r, int in)
-                                   { (void)ctx; (void)pid; (void)r; (void)in; g_map++; return 0; }
+                                   { (void)ctx; (void)pid; (void)r; (void)in; g_map++; return fail_map == (in ? 2 : 1) ? -1 : 0; }
 static void  mock_unmap(void *ctx, uint32_t pid, void *r, int in)
                                    { (void)ctx; (void)pid; (void)r; (void)in; g_unmap++; }
+
+static int allow_mutation(void *ctx) { return *(int *)ctx; }
 
 #define SYNTH 11u
 #define EFFECT 12u
@@ -89,6 +91,30 @@ int main(void)
     int sn = gc_snapshot(&gc, edges, GRAPH_MAX_EDGES, &gen);
     CHECK(sn == 1 && (gen & 1u) == 0, "snapshot is stable (even generation)");
     CHECK(gen == gc_generation(&gc), "snapshot generation matches current");
+
+    int permits = 0;
+    gc_set_mutation_guard(&gc, allow_mutation, &permits);
+    int allocs = g_new;
+    CHECK(gc_connect(&gc, SYNTH, EFFECT) == GC_EBUSY && g_new == allocs,
+          "guard refuses edge mutation before allocation");
+    CHECK(gc_add_plugin(&gc, 90) == GC_EBUSY && gc_add_input(&gc) == GC_EBUSY,
+          "guard refuses node changes");
+    CHECK(gc_set_budget(&gc, SYNTH, 10) == GC_EBUSY && gc_budget(&gc, SYNTH) == 0,
+          "legacy budget writes cannot bypass a managed plan");
+    permits = 1;
+    for (fail_map = 1; fail_map <= 2; ++fail_map) {
+        int freed = g_del, mapped = g_map, unmapped = g_unmap;
+        CHECK(gc_connect(&gc, SYNTH, EFFECT) == GC_ENOMEM,
+              "failed source or destination mapping rejects the edge");
+        CHECK(gc_list(&gc, edges, GRAPH_MAX_EDGES) == 1 && g_del == freed + 1,
+              "mapping rollback preserves old graph and frees the new ring");
+        CHECK(g_map == mapped + fail_map && g_unmap == unmapped + fail_map &&
+              !(gc_generation(&gc) & 1u), "rollback unmaps attempted endpoints and closes transaction");
+    }
+    fail_map = 0;
+    CHECK(gc_connect(&gc, SYNTH, EFFECT) == GC_OK,
+          "successful mapping still works after rollback");
+    gc_set_mutation_guard(&gc, NULL, NULL);
 
     printf("=== %s ===\n", g_fail ? "FAILURES PRESENT" : "ALL TESTS PASSED");
     return g_fail ? 1 : 0;

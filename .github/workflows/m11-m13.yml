@@ -1,0 +1,46 @@
+name: M11 and M13 integrated acceptance
+on:
+  push:
+    branches: ['feat/m11-m13-*']
+  pull_request:
+    paths: ['arch/arm64/**', 'tests/**', 'plugins/**', 'scripts/**', 'Makefile', '.github/workflows/m11-m13.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integrated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross toolchain and emulator
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+      - name: Record environment
+        run: |
+          mkdir -p build/evidence
+          { aarch64-linux-gnu-gcc --version; qemu-system-aarch64 --version; python3 --version; git rev-parse HEAD; } >build/evidence/environment.log
+      - name: M11 and M13 execution, live edits and cold boot
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j1 test-arm-m11-m13 CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build/evidence/m11-m13.log
+      - name: Previous M12 and temporal acceptance
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j1 test-arm-m12-complete CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build/evidence/m12-regression.log
+      - name: Preserve execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tessera-m11-m13-${{ github.sha }}
+          path: |
+            build/evidence/**
+            build/arm/m11-m13-validation/**
+            build/arm/session-capacity/*.log
+            build/arm/timing-runs/**
+            build/arm/timing-negative/**
+            docs/m11-m13*.md
+          include-hidden-files: false

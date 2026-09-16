@@ -48,10 +48,13 @@ typedef struct {
     pm_slot_t       slots[PM_MAX_PLUGINS];
     vfs_t           vfs;   /* plugin sources: ramdisk + SD (issue #34) */
     graph_control_t *gc;   /* optional: graph wiring (issue #28)        */
+    uint64_t        lifecycle_ticks; /* 0 legacy; managed runtime requires finite */
     uint32_t        quota_pages; /* per-plugin memory budget, 0 = unlimited  */
 } plugin_mgr_t;
 
 /* Errors (negative). */
+#define PM_EBUSY (-8)
+#define PM_ETIMEOUT (-9)
 #define PM_OK        0
 #define PM_ENOENT  (-1)   /* no such file / pid          */
 #define PM_ENOMEM  (-2)   /* out of slots / memory       */
@@ -62,6 +65,7 @@ typedef struct {
 #define PM_EQUOTA  (-7)   /* declared footprint over the memory quota    */
 
 void pm_init(plugin_mgr_t *m, graph_control_t *gc);
+int pm_set_lifecycle_budget(plugin_mgr_t *m, uint64_t ticks);
 
 /* Set the per-plugin memory budget in 4 KiB pages (0 = unlimited).  A plugin
  * whose declared footprint exceeds this is refused at load (PM_EQUOTA), before

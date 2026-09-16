@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 /* Error codes returned by the control operations (negative). */
+#define GC_EBUSY (-6)
 #define GC_OK         0
 #define GC_ENODEV   (-1)   /* a PID is not a registered node      */
 #define GC_EEXIST   (-2)   /* the edge already exists             */
@@ -41,6 +42,8 @@ typedef struct {
 } gc_ring_ops_t;
 
 typedef struct {
+    int             (*mutation_guard)(void *ctx);
+    void             *mutation_guard_ctx;
     audio_graph_t     graph;
     gc_ring_ops_t     ops;
     volatile uint32_t generation;   /* even = stable, odd = mid-rewire */
@@ -53,6 +56,9 @@ typedef struct {
 } graph_control_t;
 
 void gc_init(graph_control_t *gc, const gc_ring_ops_t *ops);
+void gc_set_mutation_guard(graph_control_t *gc, int (*guard)(void *), void *ctx);
+int gc_mutation_allowed(const graph_control_t *gc);
+
 
 /* Optional: `fn(ctx)` runs after every successful graph mutation (node add,
  * connect, disconnect) - the hook the graph scheduler uses to stage a new
@@ -85,7 +91,10 @@ int gc_list(graph_control_t *gc, gc_edge_info_t *out, int max);
 
 /* sys_plugin_set_budget: set the per-block CPU budget (counter cycles) for a
  * registered plugin (issue #78); cycles == 0 clears it back to the default
- * fair share.  Returns GC_OK, or GC_ENODEV for an unknown pid. */
+ * fair share.  Returns GC_OK, GC_ENODEV for a non-plugin/unknown pid, or
+ * GC_EINVAL for a value greater than INT64_MAX.  A single control writer
+ * owns this table; graph mutations/slot reuse occur with workers drained.
+ * In-place budget updates are atomic and consumed on the next block. */
 int gc_set_budget(graph_control_t *gc, uint32_t pid, uint64_t cycles);
 
 /* The budget set for `pid`, or 0 when none is set (the host then applies

@@ -6,6 +6,7 @@ void gc_init(graph_control_t *gc, const gc_ring_ops_t *ops)
 {
     audio_graph_init(&gc->graph, (int (*)(uint32_t))0);
     gc->ops = *ops;
+    gc->mutation_guard = 0; gc->mutation_guard_ctx = 0;
     gc->generation = 0;
     gc->on_change = (void (*)(void *))0;
     gc->on_change_ctx = (void *)0;
@@ -17,35 +18,49 @@ void gc_init(graph_control_t *gc, const gc_ring_ops_t *ops)
 
 int gc_set_budget(graph_control_t *gc, uint32_t pid, uint64_t cycles)
 {
-    if (pid == 0 || audio_graph_node_by_pid(&gc->graph, pid) < 0)
+    if (!gc_mutation_allowed(gc)) return GC_EBUSY;
+    int node = audio_graph_node_by_pid(&gc->graph, pid);
+    if (node < 0 || gc->graph.nodes[node].type != NODE_PLUGIN)
         return GC_ENODEV;
+    if (cycles > INT64_MAX)
+        return GC_EINVAL;
 
     int free_slot = -1;
     for (int i = 0; i < GRAPH_MAX_NODES; i++) {
-        if (gc->budgets[i].pid == pid) {
+        if (__atomic_load_n(&gc->budgets[i].pid, __ATOMIC_ACQUIRE) == pid) {
             if (cycles)
-                gc->budgets[i].cycles = cycles;
-            else
-                gc->budgets[i].pid = 0;        /* clear back to default */
+                __atomic_store_n(&gc->budgets[i].cycles, cycles, __ATOMIC_RELEASE);
+            else {
+                __atomic_store_n(&gc->budgets[i].pid, 0u, __ATOMIC_RELEASE);
+                __atomic_store_n(&gc->budgets[i].cycles, 0ull, __ATOMIC_RELEASE);
+            }
             return GC_OK;
         }
-        if (free_slot < 0 && gc->budgets[i].pid == 0)
+        if (free_slot < 0 && __atomic_load_n(&gc->budgets[i].pid, __ATOMIC_ACQUIRE) == 0)
             free_slot = i;
     }
     if (!cycles)
         return GC_OK;                          /* nothing set, nothing to clear */
     if (free_slot < 0)
         return GC_ENOMEM;
-    gc->budgets[free_slot].pid    = pid;
-    gc->budgets[free_slot].cycles = cycles;
+    __atomic_store_n(&gc->budgets[free_slot].cycles, cycles, __ATOMIC_RELAXED);
+    __atomic_store_n(&gc->budgets[free_slot].pid, pid, __ATOMIC_RELEASE);
     return GC_OK;
 }
 
 uint64_t gc_budget(const graph_control_t *gc, uint32_t pid)
 {
+    if (pid == 0)
+        return 0;
     for (int i = 0; i < GRAPH_MAX_NODES; i++)
-        if (gc->budgets[i].pid == pid)
-            return gc->budgets[i].cycles;
+        if (__atomic_load_n(&gc->budgets[i].pid, __ATOMIC_ACQUIRE) == pid) {
+            uint64_t cycles = __atomic_load_n(&gc->budgets[i].cycles, __ATOMIC_ACQUIRE);
+            /* A slot may be cleared/reused by the single control writer.
+             * Never return the replacement PID's setting to this caller. */
+            if (__atomic_load_n(&gc->budgets[i].pid, __ATOMIC_ACQUIRE) == pid)
+                return cycles;
+            return 0;
+        }
     return 0;
 }
 
@@ -63,6 +78,7 @@ static void gc_changed(graph_control_t *gc)
 
 int gc_add_plugin(graph_control_t *gc, uint32_t pid)
 {
+    if (!gc_mutation_allowed(gc)) return GC_EBUSY;
     int n = audio_graph_add_node(&gc->graph, pid);
     if (n >= 0)
         gc_changed(gc);
@@ -71,6 +87,7 @@ int gc_add_plugin(graph_control_t *gc, uint32_t pid)
 
 int gc_add_dac(graph_control_t *gc)
 {
+    if (!gc_mutation_allowed(gc)) return GC_EBUSY;
     int n = audio_graph_add_dac(&gc->graph);
     if (n >= 0)
         gc_changed(gc);
@@ -79,6 +96,7 @@ int gc_add_dac(graph_control_t *gc)
 
 int gc_add_input(graph_control_t *gc)
 {
+    if (!gc_mutation_allowed(gc)) return GC_EBUSY;
     int n = audio_graph_add_input(&gc->graph);
     if (n >= 0)
         gc_changed(gc);
@@ -100,6 +118,7 @@ static void gc_end(graph_control_t *gc)
 static int gc_connect_ex(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid,
                          int feedback)
 {
+    if (!gc_mutation_allowed(gc)) return GC_EBUSY;
     int si = audio_graph_node_by_pid(&gc->graph, src_pid);
     int di = audio_graph_node_by_pid(&gc->graph, dst_pid);
     if (si < 0 || di < 0)
@@ -121,8 +140,18 @@ static int gc_connect_ex(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid
     }
     audio_graph_set_edge_ring(&gc->graph, e, ring);
     if (gc->ops.ring_map) {
-        gc->ops.ring_map(gc->ops.ctx, src_pid, ring, /*input=*/0);
-        gc->ops.ring_map(gc->ops.ctx, dst_pid, ring, /*input=*/1);
+        int first = gc->ops.ring_map(gc->ops.ctx, src_pid, ring, 0);
+        int second = first ? -1 : gc->ops.ring_map(gc->ops.ctx, dst_pid, ring, 1);
+        if (first || second) {
+            if (gc->ops.ring_unmap) {
+                gc->ops.ring_unmap(gc->ops.ctx, src_pid, ring, 0);
+                if (!first) gc->ops.ring_unmap(gc->ops.ctx, dst_pid, ring, 1);
+            }
+            audio_graph_disconnect(&gc->graph, si, di);
+            gc_end(gc);
+            if (gc->ops.ring_del) gc->ops.ring_del(gc->ops.ctx, ring);
+            return GC_ENOMEM;
+        }
     }
     gc_end(gc);
     gc_changed(gc);
@@ -144,6 +173,7 @@ int gc_connect_feedback(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
 
 int gc_disconnect(graph_control_t *gc, uint32_t src_pid, uint32_t dst_pid)
 {
+    if (!gc_mutation_allowed(gc)) return GC_EBUSY;
     int si = audio_graph_node_by_pid(&gc->graph, src_pid);
     int di = audio_graph_node_by_pid(&gc->graph, dst_pid);
     if (si < 0 || di < 0)
@@ -201,4 +231,14 @@ int gc_snapshot(const graph_control_t *gc, gc_edge_info_t *out, int max, uint32_
             return n;
         }
     }
+}
+
+void gc_set_mutation_guard(graph_control_t *gc, int (*guard)(void *), void *ctx)
+{
+    gc->mutation_guard_ctx = ctx;
+    gc->mutation_guard = guard;
+}
+int gc_mutation_allowed(const graph_control_t *gc)
+{
+    return gc && (!gc->mutation_guard || gc->mutation_guard(gc->mutation_guard_ctx));
 }

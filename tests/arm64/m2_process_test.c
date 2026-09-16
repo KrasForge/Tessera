@@ -93,6 +93,18 @@ int main(void)
 
     CHECK(process_count() == 2, "process_count reports two live processes");
 
+    /* A budget kill publishes death but defers all frees until teardown. */
+    volatile uint32_t live = 1;
+    process_set_liveness(a, &live);
+    size_t before_kill = pmm_free_pages();
+    process_kill(a, -2);
+    CHECK(a->state == PROC_KILLED && a->exit_code == -2 &&
+          live == PROC_LIVENESS_DEAD, "kill marks process and shared-ring death");
+    CHECK(pmm_free_pages() == before_kill, "kill defers allocator work off audio path");
+    process_kill(a, -1);
+    CHECK(a->exit_code == -2, "repeated kill preserves original reason");
+    process_kill(0, -1);
+
     /* --- teardown reclaims everything ----------------------------------- */
     process_destroy(a);
     process_destroy(b);

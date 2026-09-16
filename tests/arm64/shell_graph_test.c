@@ -186,6 +186,9 @@ static void test_verbs(void)
     reset_all(&sh);
     run(&sh, "set-param 2 1 0xdeadbeef");
     CHECK(M.sp_bits == 0xdeadbeefu, "set-param hex -> raw bits");
+    reset_all(&sh);
+    run(&sh, "set-param 2 0 12.5");
+    CHECK(M.sp_calls == 1 && M.sp_bits == 0x41480000u, "fractional decimal -> exact float bits");
 }
 
 /* ---- errors: one line, backend told, graph untouched ---- */
@@ -215,7 +218,7 @@ static void test_errors(void)
     CHECK(saw("error: set-param: no such file"), "set-param failure reported");
 
     reset_all(&sh);
-    run(&sh, "set-param 2 0 12.5");          /* not an integer/hex */
+    run(&sh, "set-param 2 0 12.5.6");        /* malformed decimal */
     CHECK(M.sp_calls == 0 && saw("bad value"), "bad value rejected before backend");
 
     /* an unmapped code falls back to the number */

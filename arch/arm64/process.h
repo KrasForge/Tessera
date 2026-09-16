@@ -39,7 +39,7 @@ typedef enum {
 typedef struct process {
     uint32_t     pid;
     uint16_t     asid;
-    proc_state_t state;
+    _Atomic proc_state_t state; /* inspected by the serialized loader while workers run */
     uintptr_t    pgd_pa;   /* physical address of the L0 root (TTBR0_EL1)   */
     uint64_t    *pgd;      /* dereferenceable pointer to the L0 root         */
     uint64_t     ttbr0;    /* TTBR0_EL1 value: pgd_pa | (asid << 48)         */
@@ -73,6 +73,10 @@ process_t *process_create(const char *name);
  * frame, release the L0 root and the ASID.  Shared kernel tables are left
  * untouched. */
 void process_destroy(process_t *p);
+
+/* Neutralise a stopped process without allocating/freeing on the audio path.
+ * Publish ring death now; destroy it only once all workers have drained. */
+void process_kill(process_t *p, long code);
 
 /* Map [va, va+size) -> [pa, pa+size) into the process user space.  va must
  * lie within [USER_VA_BASE, USER_VA_END).  VMM_USER is added automatically;

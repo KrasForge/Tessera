@@ -1,0 +1,49 @@
+name: M12 timing and temporal acceptance
+
+on:
+  push:
+    branches: ['fix/m12-timing-*']
+  pull_request:
+    paths:
+      - 'arch/arm64/**'
+      - 'tests/**'
+      - 'plugins/**'
+      - 'scripts/*qemu_timing*'
+      - 'Makefile'
+      - '.github/workflows/m12-timing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m12-complete:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross-toolchain and emulator
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
+      - name: Record tool versions
+        run: |
+          aarch64-linux-gnu-gcc --version
+          qemu-system-aarch64 --version
+          python3 --version
+      - name: Complete M12, temporal, isolation and timing acceptance
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/arm
+          make -j1 test-arm-m12-complete CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build/arm/m12-complete.log
+      - name: Preserve all execution evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m12-timing-${{ github.sha }}
+          path: |
+            build/arm/*.log
+            build/arm/timing-runs/**
+            build/arm/timing-negative/**
+          if-no-files-found: warn

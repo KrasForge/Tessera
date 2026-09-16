@@ -8,7 +8,9 @@
  * "worker core" is a pthread and just spins politely. */
 #if defined(__aarch64__)
 static inline void aw_park(void)  { __asm__ volatile("wfe" ::: "memory"); }
-static inline void aw_wake(void)  { __asm__ volatile("sev" ::: "memory"); }
+/* Complete publication before signalling: release ordering alone does not
+ * make the preceding store globally visible before a non-memory SEV event. */
+static inline void aw_wake(void)  { __asm__ volatile("dsb ishst; sev" ::: "memory"); }
 #else
 static inline void aw_park(void)  { __asm__ volatile("" ::: "memory"); }
 static inline void aw_wake(void)  { }
@@ -17,6 +19,8 @@ static inline void aw_wake(void)  { }
 void aw_init(audio_worker_t *w, uint32_t cpu_id)
 {
     w->block_seq = 0;
+    w->release_ticks = 0;
+    w->publishing = 0;
     w->kicks     = 0;
     w->overruns  = 0;
     w->done_seq  = 0;
@@ -68,23 +72,32 @@ void aw_clear(audio_worker_t *w)
 
 int aw_kick(audio_worker_t *w, uint64_t seq)
 {
+    return aw_kick_at(w, seq, 0);
+}
+
+int aw_kick_at(audio_worker_t *w, uint64_t seq, uint64_t release_ticks)
+{
+    uint32_t idle = 0;
+    if (!__atomic_compare_exchange_n(&w->publishing, &idle, 1u, 0,
+                                     __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return (idle & 2u) ? -1 : 0;
+    int result = 1;
+    if (__atomic_load_n(&w->stop, __ATOMIC_ACQUIRE)) { result = -1; goto done; }
     uint32_t n = __atomic_load_n(&w->n_nodes, __ATOMIC_ACQUIRE);
-    if (n == 0)
-        return 1;                       /* empty worker stays parked */
+    if (!n) goto done;
     w->kicks++;
-
-    /* Late check: the worker must have answered everything published so far.
-     * Only CPU0 writes block_seq, so it can read its own copy plainly. */
     if (__atomic_load_n(&w->done_seq, __ATOMIC_ACQUIRE) != w->block_seq) {
-        w->overruns++;                  /* the block is skipped, not queued */
+        w->overruns++;
         for (uint32_t i = 0; i < n; i++)
-            w->nodes[i].overruns++;
-        return 0;
+            __atomic_fetch_add(&w->nodes[i].overruns, 1u, __ATOMIC_RELAXED);
+        result = 0;
+        goto done;
     }
-
+    w->release_ticks = release_ticks;
     __atomic_store_n(&w->block_seq, seq, __ATOMIC_RELEASE);
     aw_wake();
-    return 1;
+done:
+    __atomic_fetch_and(&w->publishing, ~1u, __ATOMIC_RELEASE);
+    return result;
 }
 
 int aw_worker_step(audio_worker_t *w)
@@ -126,6 +139,7 @@ void aw_worker_loop(audio_worker_t *w)
         if (!aw_worker_step(w))
             aw_park();
     }
+    __atomic_store_n(&w->online, 0u, __ATOMIC_RELEASE);
 }
 
 void aw_stop(audio_worker_t *w)
@@ -137,4 +151,30 @@ void aw_stop(audio_worker_t *w)
 int aw_drained(const audio_worker_t *w)
 {
     return __atomic_load_n(&w->done_seq, __ATOMIC_ACQUIRE) == w->block_seq;
+}
+
+void aw_pause(audio_worker_t *w)
+{
+    /* One atomic word gates NEW publications while retaining ownership of a
+     * publication already in progress. Gated producers never alter it. */
+    __atomic_fetch_or(&w->publishing, 2u, __ATOMIC_ACQ_REL);
+}
+int aw_paused(const audio_worker_t *w)
+{
+    return __atomic_load_n(&w->publishing, __ATOMIC_ACQUIRE) == 2u && aw_drained(w);
+}
+int aw_resume(audio_worker_t *w)
+{
+    if (!aw_paused(w) || __atomic_load_n(&w->stop, __ATOMIC_ACQUIRE)) return -1;
+    uint32_t paused = 2;
+    if (!__atomic_compare_exchange_n(&w->publishing, &paused, 0u, 0,
+                                     __ATOMIC_RELEASE, __ATOMIC_RELAXED)) return -1;
+    aw_wake();
+    return 0;
+}
+int aw_quiescent(const audio_worker_t *w)
+{
+    return aw_paused(w) || ((!__atomic_load_n(&w->online, __ATOMIC_ACQUIRE) ||
+        __atomic_load_n(&w->stop, __ATOMIC_ACQUIRE)) &&
+        !(__atomic_load_n(&w->publishing, __ATOMIC_ACQUIRE) & 1u) && aw_drained(w));
 }

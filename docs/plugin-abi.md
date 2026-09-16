@@ -174,8 +174,10 @@ code/data, hardware MMIO, or any other plugin's address space. Consequences:
   (including from `plugin_process_block`) is a protocol violation and the host
   kills the plugin. In practice this means: do not attempt any system call.
 
-Killing a plugin frees all of its resources and never disturbs the audio engine
-or other plugins (see the resilience demo in [`docs/demo.md`](demo.md)).
+Killing a plugin publishes its death immediately. The host supplies fallback
+audio and reclaims mappings at a safe control-plane point after workers drain;
+it does not free graph-owned buffers on the audio path. See the QEMU
+containment tests and their limits in [`docs/demo.md`](demo.md).
 
 ---
 
@@ -202,28 +204,54 @@ audio callback.
 
 ### Host enforcement (M12, issue #78)
 
-The constraints above are not merely advisory: the host **enforces the time
-budget**. This is host policy layered on top of the frozen v1.0 ABI - nothing
-here changes the ABI, the exports, or their signatures.
+M12 provides `budget_plugin_run` in `arch/arm64/budget.c` as the shared
+host-side execution path for an isolated `process_block`. The frozen plugin
+ABI v1.0, its exported symbols, and their signatures are unchanged.
 
-- Every plugin gets a **per-block CPU budget**: by default a fair share of the
-  block period across the plugins scheduled on its core, or a value set
-  explicitly through the control plane (`gc_set_budget`).
-- A plugin still inside `plugin_process_block` at its budget boundary is
-  **preempted mid-block** by the kernel's budget timer - it does not get to
-  finish the block, and the host emits **silence** downstream for that block
-  (an *offence*, visible as `offences=` in the `plugin_time:` stats line).
-- Offences escalate: a plugin that offends on **3 consecutive blocks is
-  killed** and unloaded, with a `[budget]` log line naming it and the measured
-  time. A clean block resets the streak - a plugin that recovers after a
-  transient overrun is forgiven (but its offence count remains visible).
-- A preempted plugin's block-local state may be inconsistent when it is next
-  entered (its stack is reset, statics persist). A plugin that cannot
-  tolerate this was already violating the no-unbounded-work rule.
+The host resolves each plugin's budget before every block: an explicit
+`gc_budget` value or `budget_fair_share(block_cycles, node_count)` when unset.
+`SYS_PLUGIN_SET_BUDGET` (host control syscall 12) accepts `(pid, cycles)`;
+cycles are **generic-counter ticks, not CPU-frequency cycles or microseconds**.
+Zero restores the default; values above `INT64_MAX` and non-plugin PIDs are
+rejected. The trusted host binds `sys_plugin_set_budget` to its graph-control
+instance, like its other control handlers. Plugins still cannot issue SVCs
+from their DSP code. In-place updates are atomic and take effect at the next
+block without resetting strike history; graph mutations and PID-slot reuse
+are serialized with drained workers. Unload releases the budget registry slot.
 
-For plugin authors the message is unchanged: finish well within the block
-period. The enforcement exists so that a plugin which does not - by bug or by
-malice - costs one block of its own silence, not the graph's.
+The executor arms the worker's generic timer immediately before entering EL0.
+An infinite loop is interrupted at expiry and unwound to the host. A normal
+return measured at or beyond its budget also counts as an offence, so racing
+a pending timer interrupt cannot escape enforcement. The timer interrupt
+performs **no UART writes**. Elapsed time and offences can be published to the
+reporter without console I/O on that interrupt path.
+
+On an offence the executor clears both output planes **after** the plugin has
+stopped, discarding even samples written before the hang. The caller supplies
+trusted, correctly sized kernel aliases of unpublished scratch output; it
+must not expose partially rendered output or plugin-controlled ring cursors
+to downstream consumers. Publish the completed output only on `BUDGET_OK`,
+and publish silence/fallback for `BUDGET_MUTE`, `BUDGET_KILL`, or `BUDGET_FAULT`.
+This is an execution-and-publication contract, not a filter that can retract
+samples another core has already consumed.
+
+The first two consecutive offences mute. The third marks `PROC_KILLED` and
+release-publishes `PROC_LIVENESS_DEAD`; subsequent process entry is refused.
+An intervening clean block resets the streak while retaining the lifetime
+offence total (`offences=` in the per-plugin stats). `pm_unload` then reclaims
+resources off the audio path once workers drain. Non-budget faults also
+silence output and terminate rather than being mistaken for a clean block.
+A deferred `[budget]` report identifies the offender, budget and measured time.
+
+**Scope and integration limits.** The current kernel has one global EL0 resume
+context, so only one core may execute isolated plugin calls at once. The
+budgeted worker uses its banked physical timer and must not also own the audio
+cadence timer; the two-core test keeps cadence on CPU0 and EL0 work on CPU1.
+This mechanism budgets `process_block`, not loader/ABI/init/destroy calls.
+A fair share alone is not admission control: graph execution, I/O and interrupt
+overhead still need reserved capacity. The QEMU gates test containment and
+synthetic callback continuity, not a universal latency guarantee or physical
+CM4/I2S performance. See [`docs/demo.md`](demo.md) for acceptance evidence.
 
 ---
 
@@ -490,3 +518,35 @@ milliseconds). v1.3 lets an event apply at the **exact sample** within its block
 
 The minor bump keeps older plugins compatible per `tessera_abi_compatible` (major
 equal, minor `<=`). Covered by `make test-arm-events`.
+
+
+### Admitted temporal-contract host
+
+The optional `temporal_host` adds per-PID periods, relative deadlines, criticality,
+overrun policies and graph admission without changing the frozen DSP exports.
+Its trusted control syscall is `SYS_PLUGIN_SET_CONTRACT` (13). The exact
+frame-synchronous model, safe configuration/lifecycle sequence, five policies,
+and real-EL0 tests are specified in
+[`temporal-contracts.md`](temporal-contracts.md). Legacy budget-only hosts continue
+to use syscall 12; the admitted host must be configured through its contract API.
+
+
+### Managed runtime integration
+
+Use `temporal_runtime.h` for bounded lifecycle and safe graph ownership, rather
+than assembling the low-level host calls manually. The runtime budgets ABI
+negotiation and lifecycle callbacks, rolls back failed loads/admission, pins
+bound plugins, and pauses/drains before topology changes or reclamation.
+Independent EL0 worker and trusted control processes now have per-core return
+state and timers. `plugin_set_param` float arguments follow AAPCS64 and void
+callbacks return normalized success. See `temporal-contracts.md` for the exact
+execution model and `temporal-runtime-verification.md` for the final gate.
+
+
+### Multicore managed workstation
+
+The M11/M13 `audio_session` host uses the existing plugin ABI and provides
+per-core temporal admission, current-frame transport, queued parameter calls
+inside the block budget, and immutable configuration replacement. No new
+mandatory DSP export is introduced. See [`m11-m13.md`](m11-m13.md) for execution,
+lifecycle ownership, command syntax, persistence and the emulator/board boundary.

@@ -48,6 +48,8 @@ typedef struct shell {
     const char        *prompt;   /* e.g. "tessera> " (NULL -> "> ")           */
     char               line[SHELL_LINE_MAX];
     int                len;
+    int                overflow;    /* reject whole line, never execute a prefix */
+    int                last_result;
     int                swallow_lf;  /* coalesce a CR's trailing LF            */
 } shell_t;
 
@@ -78,6 +80,7 @@ int shell_dispatch(shell_t *sh, int argc, char **argv);
 
 /* shell_dispatch / shell_feed return codes (negative) not from a handler. */
 #define SHELL_EMPTY    (-1)      /* blank line: prompt reprinted, no command  */
+#define SHELL_EOVERFLOW (-3)
 #define SHELL_ENOCMD   (-2)      /* no such command                           */
 
 #endif /* ARM64_SHELL_H */

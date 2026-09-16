@@ -35,6 +35,7 @@
 #include "timer.h"
 #include "exceptions.h"
 #include "uart_pl011.h"
+#include "m12_finish.h"
 #include <stdint.h>
 
 void uart_virt_init(void);
@@ -232,6 +233,9 @@ void test_main(void)
     while ((!g_w[0].online || !g_w[1].online) && rd_cntpct() - t < freq)
         ;
 
+    int workers_started = __atomic_load_n(&g_w[0].online, __ATOMIC_ACQUIRE) &&
+                          __atomic_load_n(&g_w[1].online, __ATOMIC_ACQUIRE);
+
     exceptions_init();
     gic_init();
     timer_init(BLOCK_HZ);
@@ -243,13 +247,16 @@ void test_main(void)
     timer_stop();
     __asm__ volatile("msr daifset, #2");
 
-    int drained = 0;
+    int drained = 0, stopped = 0;
     for (int k = 0; k < 2; k++) {
         uint64_t start = rd_cntpct();
         while (!aw_drained(&g_w[k]) && rd_cntpct() - start < freq)
             ;
         drained += aw_drained(&g_w[k]) ? 1 : 0;
         aw_stop(&g_w[k]);
+        start = rd_cntpct();
+        while (__atomic_load_n(&g_w[k].online, __ATOMIC_ACQUIRE) && rd_cntpct() - start < freq) { }
+        stopped += !__atomic_load_n(&g_w[k].online, __ATOMIC_ACQUIRE);
     }
 
     /* Give the reporter one more second, then stop it. */
@@ -275,7 +282,7 @@ void test_main(void)
 
     /* ---- checks ---- */
     int all_online = (e1 == 0) && (e2 == 0) && (e3 == 0) &&
-                     g_w[0].online && g_w[1].online;
+                     workers_started;
     int cpu0_ok    = (g_ac.serviced == CALLBACKS) && (g_ac.wd.overruns == 0) &&
                      (g_underruns <= TOL);
     int w_ok       = (g_w[0].blocks + g_w[0].overruns == g_w[0].kicks) &&
@@ -291,13 +298,12 @@ void test_main(void)
                      (g_seen_mean[TAG_HEAVY] >= 300u) &&
                      (g_seen_mean[TAG_HEAVY] > g_seen_mean[TAG_LIGHT]);
 
-    uart_printf("checks: online=%d cpu0=%d workers=%d reported=%d calibrated=%d drained=%d/2\r\n",
-                all_online, cpu0_ok, w_ok, reported, calibrated, drained);
+    uart_printf("checks: online=%d cpu0=%d workers=%d reported=%d calibrated=%d drained=%d/2 stopped=%d/2\r\n",
+                all_online, cpu0_ok, w_ok, reported, calibrated, drained, stopped);
 
     int ok = all_online && cpu0_ok && w_ok && reported && calibrated &&
-             (drained == 2);
+             (drained == 2) && (stopped == 2);
     uart_puts(ok ? "PTIME: PASS\r\n" : "PTIME: FAIL\r\n");
 
-    for (;;)
-        __asm__ volatile("wfe");
+    m12_finish();
 }

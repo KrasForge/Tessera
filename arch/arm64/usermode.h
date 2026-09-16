@@ -31,6 +31,8 @@ struct trapframe;
 
 #define SYS_PATCH_SAVE      10  /* (path) -> 0 or negative error (issue #40) */
 #define SYS_PATCH_LOAD      11  /* (path) -> 0 or negative error             */
+#define SYS_PLUGIN_SET_CONTRACT 13 /* (pid, period, deadline, budget, flags, argument) */
+#define SYS_PLUGIN_SET_BUDGET 12 /* (pid, counter_cycles); 0 restores default */
 
 /* Control-plane handlers; weak defaults in syscalls.c return -1, the graph
  * control plane / plugin manager provide the strong versions. */
@@ -39,6 +41,9 @@ long sys_graph_disconnect(uint32_t src_pid, uint32_t dst_pid);
 long sys_graph_list(void);
 long sys_plugin_load(const char *path);
 long sys_plugin_unload(uint32_t pid);
+long sys_plugin_set_budget(uint32_t pid, uint64_t cycles);
+long sys_plugin_set_contract(uint32_t pid, uint64_t period, uint64_t deadline,
+                              uint64_t budget, uint64_t flags, uint64_t argument);
 long sys_plugin_set_param(uint32_t pid, uint32_t param_id, uint32_t value_bits);
 long sys_patch_save(const char *path);
 long sys_patch_load(const char *path);
