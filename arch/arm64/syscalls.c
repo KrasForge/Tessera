@@ -54,8 +54,27 @@ __attribute__((weak)) long sys_plugin_load(const char *p)               { (void)
 __attribute__((weak)) long sys_plugin_unload(uint32_t pid)              { (void)pid; return -1; }
 __attribute__((weak)) long sys_plugin_set_param(uint32_t pid, uint32_t id, uint32_t b)
                                                                         { (void)pid; (void)id; (void)b; return -1; }
+__attribute__((weak)) long sys_plugin_set_budget(uint32_t pid, uint64_t cycles)
+                                                                         { (void)pid; (void)cycles; return -1; }
+__attribute__((weak)) long sys_plugin_set_contract(uint32_t pid, uint64_t period,
+        uint64_t deadline, uint64_t budget, uint64_t flags, uint64_t argument)
+{ (void)pid; (void)period; (void)deadline; (void)budget; (void)flags; (void)argument; return -2; }
 __attribute__((weak)) long sys_patch_save(const char *p)                { (void)p; return -1; }
 __attribute__((weak)) long sys_patch_load(const char *p)                { (void)p; return -1; }
+
+/* Weak reference keeps harnesses without budget.c linkable. */
+extern int budget_active(void) __attribute__((weak));
+
+/* The standalone EL0 smoke fixture deliberately omits process.c. Production
+ * builds use its full liveness-publishing termination; keep the minimal
+ * fixture linkable without introducing a second production implementation. */
+extern void process_kill(process_t *p, long code) __attribute__((weak));
+static void terminate_process(process_t *p)
+{
+    if (!p) return;
+    if (process_kill) process_kill(p, -1);
+    else { p->state = PROC_KILLED; p->exit_code = -1; }
+}
 
 void arm64_handle_svc(struct trapframe *tf)
 {
@@ -71,10 +90,14 @@ void arm64_handle_svc(struct trapframe *tf)
     process_t *gp = current_process();
     if (gp && gp->svc_gate) {
         uint64_t elr = tf->elr_el1;
-        if (elr < gp->svc_gate || elr >= gp->svc_gate + SVC_GATE_PAGE) {
-            uart_printf("  [sandbox] illegal SVC #%u from pid=%u (%s)\r\n",
-                        (unsigned)num, (unsigned)gp->pid, gp->name);
-            gp->state = PROC_KILLED;
+        /* A plugin can branch directly to the trampoline's SVC instruction.
+         * Checking only its address would allow arbitrary kernel services
+         * (including unbounded UART writes) while IRQs are masked at EL1. */
+        if (num != SYS_EXIT || elr < gp->svc_gate || elr >= gp->svc_gate + SVC_GATE_PAGE) {
+            if (!budget_active || !budget_active())
+                uart_printf("  [sandbox] illegal SVC #%u from pid=%u (%s)\r\n",
+                            (unsigned)num, (unsigned)gp->pid, gp->name);
+            terminate_process(gp);
             if (sched_active())
                 sched_kill(tf);
             else
@@ -140,6 +163,16 @@ void arm64_handle_svc(struct trapframe *tf)
                                                   (uint32_t)tf->x[2]);
         break;
 
+    case SYS_PLUGIN_SET_BUDGET:
+        tf->x[0] = (uint64_t)sys_plugin_set_budget((uint32_t)tf->x[0], tf->x[1]);
+        break;
+
+    case SYS_PLUGIN_SET_CONTRACT:
+        tf->x[0] = tf->x[0] > UINT32_MAX ? (uint64_t)-1 :
+            (uint64_t)sys_plugin_set_contract((uint32_t)tf->x[0], tf->x[1],
+                    tf->x[2], tf->x[3], tf->x[4], tf->x[5]);
+        break;
+
     case SYS_PATCH_SAVE:
         tf->x[0] = (uint64_t)sys_patch_save((const char *)(uintptr_t)tf->x[0]);
         break;
@@ -162,15 +195,15 @@ void arm64_user_fault(struct trapframe *tf)
     uint32_t   ec = (uint32_t)((tf->esr_el1 >> 26) & 0x3F);
     process_t *p  = current_process();
 
-    uart_puts("  [fault] terminating EL0 process");
-    if (p) {
-        uart_printf(" pid=%u (%s)", (unsigned)p->pid, p->name);
-        p->state = PROC_KILLED;
+    if (!budget_active || !budget_active()) {
+        uart_puts("  [fault] terminating EL0 process");
+        if (p) uart_printf(" pid=%u (%s)", (unsigned)p->pid, p->name);
+        if (arm64_ec_class(ec) == EC_CLASS_DATA_ABORT)
+            uart_printf(" on %s access",
+                        arm64_abort_is_write(tf->esr_el1) ? "write" : "read");
+        uart_puts("\r\n");
     }
-    if (arm64_ec_class(ec) == EC_CLASS_DATA_ABORT)
-        uart_printf(" on %s access",
-                    arm64_abort_is_write(tf->esr_el1) ? "write" : "read");
-    uart_puts("\r\n");
+    terminate_process(p);
 
     if (sched_active())
         sched_kill(tf);     /* switch to the next task, or unwind if last */

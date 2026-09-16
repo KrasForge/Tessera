@@ -17,6 +17,8 @@ static inline void aw_wake(void)  { }
 void aw_init(audio_worker_t *w, uint32_t cpu_id)
 {
     w->block_seq = 0;
+    w->release_ticks = 0;
+    w->pause_requested = 0; w->publishing = 0;
     w->kicks     = 0;
     w->overruns  = 0;
     w->done_seq  = 0;
@@ -68,23 +70,33 @@ void aw_clear(audio_worker_t *w)
 
 int aw_kick(audio_worker_t *w, uint64_t seq)
 {
+    return aw_kick_at(w, seq, 0);
+}
+
+int aw_kick_at(audio_worker_t *w, uint64_t seq, uint64_t release_ticks)
+{
+    uint32_t idle = 0;
+    if (!__atomic_compare_exchange_n(&w->publishing, &idle, 1u, 0,
+                                     __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)) return 0;
+    int result = 1;
+    if (__atomic_load_n(&w->pause_requested, __ATOMIC_SEQ_CST) ||
+        __atomic_load_n(&w->stop, __ATOMIC_ACQUIRE)) { result = -1; goto done; }
     uint32_t n = __atomic_load_n(&w->n_nodes, __ATOMIC_ACQUIRE);
-    if (n == 0)
-        return 1;                       /* empty worker stays parked */
+    if (!n) goto done;
     w->kicks++;
-
-    /* Late check: the worker must have answered everything published so far.
-     * Only CPU0 writes block_seq, so it can read its own copy plainly. */
     if (__atomic_load_n(&w->done_seq, __ATOMIC_ACQUIRE) != w->block_seq) {
-        w->overruns++;                  /* the block is skipped, not queued */
+        w->overruns++;
         for (uint32_t i = 0; i < n; i++)
-            w->nodes[i].overruns++;
-        return 0;
+            __atomic_fetch_add(&w->nodes[i].overruns, 1u, __ATOMIC_RELAXED);
+        result = 0;
+        goto done;
     }
-
+    w->release_ticks = release_ticks;
     __atomic_store_n(&w->block_seq, seq, __ATOMIC_RELEASE);
     aw_wake();
-    return 1;
+done:
+    __atomic_store_n(&w->publishing, 0u, __ATOMIC_RELEASE);
+    return result;
 }
 
 int aw_worker_step(audio_worker_t *w)
@@ -126,6 +138,7 @@ void aw_worker_loop(audio_worker_t *w)
         if (!aw_worker_step(w))
             aw_park();
     }
+    __atomic_store_n(&w->online, 0u, __ATOMIC_RELEASE);
 }
 
 void aw_stop(audio_worker_t *w)
@@ -137,4 +150,26 @@ void aw_stop(audio_worker_t *w)
 int aw_drained(const audio_worker_t *w)
 {
     return __atomic_load_n(&w->done_seq, __ATOMIC_ACQUIRE) == w->block_seq;
+}
+
+void aw_pause(audio_worker_t *w)
+{
+    __atomic_store_n(&w->pause_requested, 1u, __ATOMIC_SEQ_CST);
+}
+int aw_paused(const audio_worker_t *w)
+{
+    return __atomic_load_n(&w->pause_requested, __ATOMIC_SEQ_CST) &&
+        !__atomic_load_n(&w->publishing, __ATOMIC_ACQUIRE) && aw_drained(w);
+}
+int aw_resume(audio_worker_t *w)
+{
+    if (!aw_paused(w) || __atomic_load_n(&w->stop, __ATOMIC_ACQUIRE)) return -1;
+    __atomic_store_n(&w->pause_requested, 0u, __ATOMIC_RELEASE);
+    aw_wake();
+    return 0;
+}
+int aw_quiescent(const audio_worker_t *w)
+{
+    return aw_paused(w) || ((!__atomic_load_n(&w->online, __ATOMIC_ACQUIRE) ||
+        __atomic_load_n(&w->stop, __ATOMIC_ACQUIRE)) && aw_drained(w));
 }

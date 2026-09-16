@@ -9,6 +9,7 @@
 #include "exceptions.h"
 #include "gic.h"
 #include "timer.h"
+#include "budget.h"
 #include <stdint.h>
 
 /* DMA completion interrupt from the I2S audio channel (issue #17).  The
@@ -43,11 +44,11 @@ void arm64_irq(struct trapframe *tf)
     if (id >= GIC_SPURIOUS)
         return;                 /* spurious: no handler, no EOI */
 
-    if (id == TIMER_IRQ) {
-        if (!budget_timer_irq(tf, iar)) {
-            timer_tick();       /* reload + count                          */
-            scheduler_tick(tf); /* may preempt: swaps the on-stack frame    */
-        }
+    if (id == BUDGET_TIMER_IRQ) {
+        budget_timer_irq(tf, iar);
+    } else if (id == TIMER_IRQ) {
+        timer_tick();
+        scheduler_tick(tf);
     } else if (id == DMA_AUDIO_IRQ) {
         audio_dma_irq();
     }

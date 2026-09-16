@@ -54,6 +54,17 @@ static void ring_unmap(void *c, uint32_t p, void *r, int in){ (void)c;(void)p;(v
 static graph_control_t g_gc;
 static plugin_mgr_t    g_pm;
 
+static int budget_set_seen, budget_clear_seen;
+long sys_plugin_set_budget(uint32_t pid, uint64_t cycles)
+{
+    int r = gc_set_budget(&g_gc, pid, cycles);
+    if (r == GC_OK && cycles == 0x100000123ull && gc_budget(&g_gc, pid) == cycles)
+        budget_set_seen++;
+    if (r == GC_OK && cycles == 0 && gc_budget(&g_gc, pid) == 0)
+        budget_clear_seen++;
+    return r;
+}
+
 /* Strong syscall handlers, backed by the manager / control plane. */
 long sys_plugin_load(const char *path)                         { return pm_load(&g_pm, path); }
 long sys_plugin_unload(uint32_t pid)                           { return pm_unload(&g_pm, pid); }
@@ -83,7 +94,9 @@ void test_main(void)
     for (int i = 0; i < 100; i++) {
         long pid = pm_load(&g_pm, "pass");
         if (pid <= 0) { load_ok = 0; break; }
-        if (pm_unload(&g_pm, (uint32_t)pid) != PM_OK) { load_ok = 0; break; }
+        if (gc_set_budget(&g_gc, (uint32_t)pid, 1000) != GC_OK) { load_ok = 0; break; }
+        if (pm_unload(&g_pm, (uint32_t)pid) != PM_OK ||
+            gc_budget(&g_gc, (uint32_t)pid) != 0) { load_ok = 0; break; }
     }
     size_t after = pmm_free_pages();
     uart_printf("leak: baseline=%u after-100x=%u load_ok=%d\r\n",
@@ -113,7 +126,13 @@ void test_main(void)
     uart_printf("svc: load=%d setp=%d conn=%d disc=%d unload=%d\r\n",
                 (int)cres[0], (int)cres[1], (int)cres[2], (int)cres[3], (int)cres[4]);
     int svc_ok = (cres[0] > 0) && (cres[1] == 0) && (cres[2] == 0) &&
-                 (cres[3] == 0) && (cres[4] == 0);
+                 (cres[3] == 0) && (cres[4] == 0) &&
+                 cres[5] == GC_OK && cres[6] == GC_OK &&
+                 cres[7] == GC_EINVAL && cres[8] == GC_ENODEV &&
+                 budget_set_seen == 1 && budget_clear_seen == 1;
+    uart_printf("budget-svc: set=%d clear=%d range=%d stale=%d seen=%d/%d\r\n",
+                (int)cres[5], (int)cres[6], (int)cres[7], (int)cres[8],
+                budget_set_seen, budget_clear_seen);
 
     uart_printf("checks: no-leak=%d param=%d svc=%d\r\n", no_leak, param_ok, svc_ok);
     uart_puts((no_leak && param_ok && svc_ok) ? "CONTROL: PASS\r\n"

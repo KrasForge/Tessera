@@ -31,6 +31,7 @@
 #include "timer.h"
 #include "exceptions.h"
 #include "uart_pl011.h"
+#include "m12_finish.h"
 #include <stdint.h>
 
 void uart_virt_init(void);
@@ -39,7 +40,7 @@ void exceptions_init(void);
 static uint64_t rd_cntpct(void)
 {
     uint64_t v;
-    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(v));
+    __asm__ volatile("isb; mrs %0, cntpct_el0" : "=r"(v) :: "memory");
     return v;
 }
 
@@ -91,6 +92,11 @@ void scheduler_tick(struct trapframe *tf)
     lat_record(&g_lat, entry);
     if (audio_core_fill(&g_ac) < FRAMES * 2u)
         g_underruns++;
+#ifdef TIMING_INJECT_SERVICE_DELAY
+    /* Negative control only: the unmodified watchdog MUST reject this. */
+    if (g_ac.serviced == 31)
+        while (rd_cntpct() - entry <= g_ac.wd.budget + 1000u) { }
+#endif
     uint64_t service = rd_cntpct() - entry;
     audio_wd_account(&g_ac.wd, service);
     g_ac.serviced++;
@@ -221,6 +227,5 @@ void test_main(void)
     int ok = serviced_all && reported && stats_sane && no_underrun && no_overrun;
     uart_puts(ok ? "AUDIO-LAT: PASS\r\n" : "AUDIO-LAT: FAIL\r\n");
 
-    for (;;)
-        __asm__ volatile("wfe");
+    m12_finish();
 }

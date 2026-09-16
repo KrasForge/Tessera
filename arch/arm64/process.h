@@ -74,6 +74,10 @@ process_t *process_create(const char *name);
  * untouched. */
 void process_destroy(process_t *p);
 
+/* Neutralise a stopped process without allocating/freeing on the audio path.
+ * Publish ring death now; destroy it only once all workers have drained. */
+void process_kill(process_t *p, long code);
+
 /* Map [va, va+size) -> [pa, pa+size) into the process user space.  va must
  * lie within [USER_VA_BASE, USER_VA_END).  VMM_USER is added automatically;
  * pass the other VMM_* flags (e.g. VMM_READ | VMM_WRITE).  Returns 0 on

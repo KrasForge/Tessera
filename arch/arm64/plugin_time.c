@@ -24,42 +24,55 @@ void pt_publish(audio_worker_t *w, void *board)
     if (!b)
         return;
 
-    __atomic_store_n(&b->seq, b->seq + 1u, __ATOMIC_RELEASE);      /* odd  */
-
-    uint32_t n = w->n_nodes;
-    if (n > AW_MAX_NODES)
-        n = AW_MAX_NODES;
-    b->n = n;
+    uint32_t seq = __atomic_fetch_add(&b->seq, 1u, __ATOMIC_RELAXED);
+    /* Publish the odd sequence before ANY payload changes.  Payload fields
+     * are atomic too: rejecting a torn snapshot does not legalise C races. */
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    uint32_t n = __atomic_load_n(&w->n_nodes, __ATOMIC_ACQUIRE);
+    if (n > AW_MAX_NODES) n = AW_MAX_NODES;
+    __atomic_store_n(&b->n, n, __ATOMIC_RELAXED);
     for (uint32_t i = 0; i < n; i++) {
         const aw_node_t *nd = &w->nodes[i];
-        b->e[i].tag      = nd->tag;
-        b->e[i].runs     = nd->runs;
-        b->e[i].overruns = nd->overruns;
-        b->e[i].offences = nd->offences;
-        b->e[i].min      = nd->runs ? nd->svc_min : 0;
-        b->e[i].max      = nd->svc_max;
-        b->e[i].sum      = nd->svc_sum;
+#define PT_STORE(field, value) __atomic_store_n(&b->e[i].field, (value), __ATOMIC_RELAXED)
+        PT_STORE(tag, nd->tag);
+        PT_STORE(runs, nd->runs);
+        PT_STORE(overruns, __atomic_load_n(&nd->overruns, __ATOMIC_RELAXED));
+        PT_STORE(offences, nd->offences);
+        PT_STORE(min, nd->runs ? nd->svc_min : 0);
+        PT_STORE(max, nd->svc_max);
+        PT_STORE(sum, nd->svc_sum);
+#undef PT_STORE
     }
-
-    __atomic_store_n(&b->seq, b->seq + 1u, __ATOMIC_RELEASE);      /* even */
+    __atomic_store_n(&b->seq, seq + 2u, __ATOMIC_RELEASE);
 }
 
 int pt_snapshot(const pt_board_t *b, pt_entry_t *out, int cap, int retries)
 {
+    if (!b || cap < 0 || (cap > 0 && !out) || retries < 1)
+        return -1;
+    if (cap > AW_MAX_NODES) cap = AW_MAX_NODES;
     for (int attempt = 0; attempt < retries; attempt++) {
         uint32_t s1 = __atomic_load_n(&b->seq, __ATOMIC_ACQUIRE);
-        if (s1 & 1u)
-            continue;                          /* publish in progress */
-
-        int n = (int)b->n;
-        if (n > cap)
-            n = cap;
-        for (int i = 0; i < n; i++)
-            out[i] = b->e[i];
-
-        uint32_t s2 = __atomic_load_n(&b->seq, __ATOMIC_ACQUIRE);
-        if (s1 == s2)
-            return n;                          /* stable across the copy */
+        if (s1 & 1u) continue;
+        uint32_t count = __atomic_load_n(&b->n, __ATOMIC_RELAXED);
+        int n = count > (uint32_t)cap ? cap : (int)count;
+        for (int i = 0; i < n; i++) {
+#define PT_LOAD(field) out[i].field = __atomic_load_n(&b->e[i].field, __ATOMIC_RELAXED)
+            PT_LOAD(tag);
+            PT_LOAD(runs);
+            PT_LOAD(overruns);
+            PT_LOAD(offences);
+            PT_LOAD(min);
+            PT_LOAD(max);
+            PT_LOAD(sum);
+#undef PT_LOAD
+        }
+        /* Complete payload reads before validating the sequence.  Together
+         * with the writer's release fence, seeing any new payload prevents
+         * accepting the preceding even sequence. */
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        uint32_t s2 = __atomic_load_n(&b->seq, __ATOMIC_RELAXED);
+        if (s1 == s2) return n;
     }
     return -1;
 }

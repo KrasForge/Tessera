@@ -31,7 +31,13 @@ plugin_tramp_start:
     ldr     x2,  [x19, #24]         /* arg2                           */
     ldr     x3,  [x19, #32]         /* arg3                           */
     ldr     x4,  [x19, #40]         /* arg4                           */
-    blr     x20                     /* call the plugin function       */
+    ldr     x21, [x19, #48]         /* mode: bit0 float parameter, bit1 void result */
+    tbz     x21, #0, 1f
+    fmov    s0, w1                 /* AAPCS64 plugin_set_param(id, float) */
+1:  blr     x20                     /* call the plugin function       */
+    tbz     x21, #1, 2f
+    mov     x0, #0                  /* void callbacks have no return code */
+2:
     mov     x8, #2                  /* SYS_EXIT                       */
     svc     #0                      /* exit with x0 = return value    */
 0:  b       0b                      /* unreachable                    */

@@ -12,6 +12,7 @@
 #include "vmem.h"
 #include "usermode.h"
 #include "budget.h"
+#include "el0_context.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -22,7 +23,7 @@
 
 static process_t g_proc[MAX_PROCESSES];
 static uint32_t  g_next_pid = 1;
-static process_t *g_current;    /* process currently at EL0, or NULL */
+static process_t *g_current[EL0_CONTEXT_CPUS]; /* core-owned, supports nesting */
 
 static void copy_name(char *dst, const char *src)
 {
@@ -75,6 +76,16 @@ void process_set_liveness(process_t *p, volatile uint32_t *status)
 {
     if (p)
         p->liveness = status;
+}
+
+void process_kill(process_t *p, long code)
+{
+    if (!p || p->state == PROC_UNUSED || p->state == PROC_KILLED)
+        return;
+    p->exit_code = code;
+    p->state = PROC_KILLED;
+    if (p->liveness)
+        __atomic_store_n(p->liveness, PROC_LIVENESS_DEAD, __ATOMIC_RELEASE);
 }
 
 void process_set_svc_gate(process_t *p, uint64_t gate_va)
@@ -153,49 +164,55 @@ size_t process_count(void)
 
 process_t *current_process(void)
 {
-    return g_current;
+    return g_current[el0_cpu_index()];
 }
 
 void process_set_current(process_t *p)
 {
-    g_current = p;
+    g_current[el0_cpu_index()] = p;
 }
 
 #ifndef HOSTTEST   /* process_run drops to EL0 (entry.S) and touches TTBR0 */
 
-/* run_user()/kernel_resume() stash the kernel's resume context in this single
- * global slot (entry.S).  A nested process_run() - e.g. the ABI-version
- * handshake the plugin manager runs while it is itself servicing an EL0 syscall
- * from another process - would overwrite the outer process's saved context, so
- * we preserve and restore it around the inner run to keep run_user re-entrant. */
-extern unsigned char g_kresume[112];
+/* Each core owns a return context. Nested calls on the same core (e.g.
+ * loading a plugin from a trusted control syscall) preserve the outer slot. */
+void el0_fp_save(void *state);
+void el0_fp_restore(const void *state);
 
 long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
 {
-    if (!p || p->state == PROC_UNUSED)
+    if (!p || p->state == PROC_UNUSED || p->state == PROC_KILLED)
         return -1;
 
     /* Preserve the kernel's TTBR0 so we can restore it after the process
      * exits or is killed. */
-    uint64_t kttbr;
+    uint32_t cpu = el0_cpu_index();
+    uint64_t kttbr, caller_daif, caller_cpacr;
+    uint64_t fp_state[66] __attribute__((aligned(16)));
+    __asm__ volatile("mrs %0, daif" : "=r"(caller_daif));
+    __asm__ volatile("mrs %0, cpacr_el1" : "=r"(caller_cpacr));
+    __asm__ volatile("msr cpacr_el1, %0; isb" :: "r"(caller_cpacr | (3ull << 20)) : "memory");
+    el0_fp_save(fp_state);
     __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(kttbr));
 
     /* Snapshot any outer run_user() context before the nested run clobbers it. */
-    unsigned char saved_kresume[112];
-    for (int i = 0; i < 112; i++)
-        saved_kresume[i] = g_kresume[i];
+    unsigned char saved_kresume[EL0_RESUME_BYTES];
+    for (int i = 0; i < EL0_RESUME_BYTES; i++)
+        saved_kresume[i] = g_kresume[cpu][i];
 
-    process_t *prev = g_current;
-    g_current = p;
+    process_t *prev = g_current[cpu];
+    g_current[el0_cpu_index()] = p;
     p->state  = PROC_RUNNING;
 
     long code = run_user(entry, user_sp, p->ttbr0, arg0);
 
-    for (int i = 0; i < 112; i++)
-        g_kresume[i] = saved_kresume[i];
+    for (int i = 0; i < EL0_RESUME_BYTES; i++)
+        g_kresume[cpu][i] = saved_kresume[i];
 
     __asm__ volatile("msr ttbr0_el1, %0; isb" :: "r"(kttbr));
-    g_current = prev;
+    g_current[cpu] = prev;
+    el0_fp_restore(fp_state);
+    __asm__ volatile("msr cpacr_el1, %0; isb" :: "r"(caller_cpacr) : "memory");
 
     p->exit_code = code;
     if (code == BUDGET_PREEMPTED) {
@@ -203,6 +220,7 @@ long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
          * escalation policy decides whether it runs again.  No liveness
          * broadcast; downstream keeps reading (the host mutes the output). */
         p->state = PROC_READY;
+        __asm__ volatile("msr daif, %0" :: "r"(caller_daif) : "memory");
         return code;
     }
     p->state = (code < 0) ? PROC_KILLED : PROC_ZOMBIE;
@@ -213,6 +231,7 @@ long process_run(process_t *p, uint64_t entry, uint64_t user_sp, uint64_t arg0)
     if (code < 0 && p->liveness)
         __atomic_store_n(p->liveness, PROC_LIVENESS_DEAD, __ATOMIC_RELEASE);
 
+    __asm__ volatile("msr daif, %0" :: "r"(caller_daif) : "memory");
     return code;
 }
 #endif /* !HOSTTEST */

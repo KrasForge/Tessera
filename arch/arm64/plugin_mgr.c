@@ -28,7 +28,15 @@ void pm_init(plugin_mgr_t *m, graph_control_t *gc)
     }
     vfs_init(&m->vfs);
     m->gc = gc;
+    m->lifecycle_ticks = 0;
     m->quota_pages = 0;          /* unlimited until pm_set_quota() (Theme A) */
+}
+
+int pm_set_lifecycle_budget(plugin_mgr_t *m, uint64_t ticks)
+{
+    if (!m || !ticks || ticks > INT64_MAX) return PM_EABI;
+    m->lifecycle_ticks = ticks;
+    return PM_OK;
 }
 
 void pm_set_quota(plugin_mgr_t *m, uint32_t pages)
@@ -57,6 +65,8 @@ static pm_slot_t *slot_by_pid(plugin_mgr_t *m, uint32_t pid)
 
 long pm_load(plugin_mgr_t *m, const char *path)
 {
+    if (!m || !path || !path[0]) return PM_ENOENT;
+    if (m->gc && !gc_mutation_allowed(m->gc)) return PM_EBUSY;
     pm_slot_t *s = (pm_slot_t *)0;
     for (int i = 0; i < PM_MAX_PLUGINS; i++)
         if (!m->slots[i].used) { s = &m->slots[i]; break; }
@@ -127,10 +137,11 @@ long pm_load(plugin_mgr_t *m, const char *path)
     /* ABI handshake at EL0: the plugin must report a matching major version
      * before plugin_init() is ever entered.  A faulting / missing handshake
      * (-1) or a mismatched major rejects the load and tears the process down. */
+    s->plugin.lifecycle_ticks = m->lifecycle_ticks;
     long ver = plugin_call_abi_version(&s->plugin);
     if (ver < 0 || !tessera_abi_compatible((uint32_t)ver)) {
         process_destroy(s->plugin.proc);
-        return PM_EABI;
+        return ver == PLUGIN_ETIMEOUT ? PM_ETIMEOUT : PM_EABI;
     }
 
     /* Per-plugin parameter queue, mapped into the plugin at PARAM_Q_VA. */
@@ -142,8 +153,14 @@ long pm_load(plugin_mgr_t *m, const char *path)
     }
     s->pq = (param_queue_t *)P2V(pqpa);
     pq_init(s->pq, PM_PARAM_CAP);
-    plugin_map_region(&s->plugin, PARAM_Q_VA, pqpa, pqpages * PAGE_SIZE,
-                      VMM_READ | VMM_WRITE);
+    if (plugin_map_region(&s->plugin, PARAM_Q_VA, pqpa, pqpages * PAGE_SIZE,
+                          VMM_READ | VMM_WRITE) != 0) {
+        /* vmm_map_into rolls partial mappings back; these pages are still ours. */
+        phys_free_contig(pqpa, pqpages);
+        process_destroy(s->plugin.proc);
+        s->pq = (param_queue_t *)0;
+        return PM_ENOMEM;
+    }
 
     s->used = 1;
     s->pid  = s->plugin.proc->pid;
@@ -154,17 +171,24 @@ long pm_load(plugin_mgr_t *m, const char *path)
     s->path[k] = '\0';
     s->n_params = 0;
 
-    if (m->gc)
-        gc_add_plugin(m->gc, s->pid);
-
+    if (m->gc && gc_add_plugin(m->gc, s->pid) < 0) {
+        process_destroy(s->plugin.proc);
+        s->used = 0; s->pid = 0; s->pq = (param_queue_t *)0;
+        return PM_ENOMEM;
+    }
     return (long)s->pid;
 }
 
 int pm_unload(plugin_mgr_t *m, uint32_t pid)
 {
+    if (!m) return PM_ENOENT;
+    if (m->gc && !gc_mutation_allowed(m->gc)) return PM_EBUSY;
     pm_slot_t *s = slot_by_pid(m, pid);
     if (!s)
         return PM_ENOENT;
+
+    if (__atomic_load_n(&s->plugin.host_refs, __ATOMIC_ACQUIRE) ||
+        __atomic_load_n(&s->plugin.call_busy, __ATOMIC_ACQUIRE)) return PM_EBUSY;
 
     /* Disconnect every edge that touches this plugin first. */
     if (m->gc) {
@@ -180,6 +204,7 @@ int pm_unload(plugin_mgr_t *m, uint32_t pid)
                     pm_disconnect(m, sp, dp);
                 }
             }
+            gc_set_budget(m->gc, pid, 0); /* release the per-PID budget slot */
             audio_graph_remove_node(&m->gc->graph, self);
         }
     }

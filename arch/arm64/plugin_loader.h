@@ -49,9 +49,15 @@ typedef struct {
     uintptr_t  param_pa;     /* kernel-visible alias of the param page */
     plugin_region_t regions[PLUGIN_MAX_REGIONS];
     int        n_regions;
+    uint64_t   lifecycle_ticks; /* configured by the managed runtime before ABI call */
+    uint32_t   call_busy;       /* try-lock protects trampoline args from same-PID reentry */
+    uint32_t   host_refs;       /* prevents freeing an instance still bound to a host */
 } plugin_t;
 
 /* Errors. */
+#define PLUGIN_ETIMEOUT (-8)
+#define PLUGIN_EBUSY (-9)
+#define PLUGIN_ENOTSUP (-10)
 #define PLUGIN_OK         0
 #define PLUGIN_EBADELF  (-1)
 #define PLUGIN_ENOPROC  (-2)
@@ -71,6 +77,12 @@ long plugin_call_init(plugin_t *pl, uint32_t sample_rate, uint32_t block_size);
  * first call) and return the version it reports, or -1 if the symbol is missing
  * or the call faulted.  Used to validate the ABI before plugin_init runs. */
 long plugin_call_abi_version(plugin_t *pl);
+/* Control-path lifecycle callbacks; zero lifecycle_ticks is legacy unbounded
+ * mode. Managed temporal runtimes require a finite budget. Parameter values
+ * are IEEE-754 bits passed in s0 according to AAPCS64. */
+long plugin_call_set_param(plugin_t *pl, uint32_t id, uint32_t value_bits);
+long plugin_call_destroy(plugin_t *pl);
+
 
 /* Run the plugin's plugin_process_block(in_l, in_r, out_l, out_r, n_frames) at
  * EL0 through the trampoline.  The pointer arguments are VAs in the plugin's
