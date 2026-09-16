@@ -223,8 +223,15 @@ static const char *b_strerror(void *be, const char *verb, int code)
 }
 
 static shell_graph_ops_t g_ops = {
-    b_load, b_unload, b_wire, b_unwire, b_setparam,
-    b_describe, b_get_stats, b_strerror, 0
+    .load = b_load,
+    .unload = b_unload,
+    .wire = b_wire,
+    .unwire = b_unwire,
+    .set_param = b_setparam,
+    .describe = b_describe,
+    .get_stats = b_get_stats,
+    .strerror = b_strerror,
+    .be = 0,
 };
 
 /* ---- harness commands: run, done ---- */

@@ -1,103 +1,121 @@
-# Resilience demo: hostile plugins caught, killed, audio keeps running
+# Resilience demo: memory, syscall and CPU-budget containment
 
-This is the resilience "done when" demo. It began as the M8 capstone (issue
-#36) and grew a third leg with M12's time-safe sandbox (issue #79):
+M8/M12 acceptance uses real AArch64 EL0 plugins with the MMU and exception
+vectors enabled on QEMU `virt`. Two complementary harnesses distinguish
+logical output containment from timer-driven callback continuity. Neither is
+a physical DAC recording or a hardware latency benchmark.
 
-> An externally-supplied plugin binary is loaded at runtime, sandboxed, and
-> crashing - or hanging - it does not disturb the audio engine or other plugins.
+## Run the complete M12 gate
 
-Four plugins are loaded into isolated, sandboxed address spaces and wired into
-the audio graph:
-
-| Plugin | Source | Behaviour |
-| --- | --- | --- |
-| `good`  | [`plugins/test/good_plugin.c`](../plugins/test/good_plugin.c)   | A clean 440 Hz sine generator. Renders audio every block. |
-| `crash` | [`plugins/test/crash_plugin.c`](../plugins/test/crash_plugin.c) | Dereferences a NULL pointer inside `process_block`. |
-| `evil`  | [`plugins/test/evil_plugin.c`](../plugins/test/evil_plugin.c)   | Issues a syscall (`SVC`) from `process_block`, then attempts a wild write to a kernel address. |
-| `hog`   | [`plugins/test/hog_plugin.c`](../plugins/test/hog_plugin.c)     | Spins forever inside `process_block` - no bad access, no syscall, just stolen time. |
-
-Every block, the `good` plugin's `process_block` runs and the host (the "DAC")
-reads real audio back from its output. At the trigger block - modelling "after
-3 seconds" - the `crash` and `evil` plugins are run and are each caught and
-killed, and the `hog` starts running under its CPU budget: it is preempted at
-its budget boundary every block, muted while it offends, and killed by the
-escalation policy on its third consecutive offence. The `good` plugin and the
-DAC never miss a block. The whole load / run / kill / unload cycle repeats 10
-times and the frame allocator returns exactly to its baseline, so nothing leaks
-- including the budget-killed `hog`.
-
-## The three sandbox legs
-
-A plugin can misbehave in exactly three ways, and each has an independent,
-hardware- or kernel-enforced containment:
-
-- **Memory - MMU data abort.** `crash`'s NULL dereference (and `evil`'s wild
-  kernel write) fault from EL0; the MMU blocks the access and the kernel kills
-  the process. Kernel memory is never touched.
-- **Syscalls - the SVC gate.** `evil`'s `SVC` from the audio path is a protocol
-  violation (a sandboxed plugin may only reach the kernel through its controlled
-  trampoline, issue #35), so the kernel kills it instead of servicing the call.
-- **Time - the CPU budget.** `hog` commits no bad access and makes no syscall,
-  so neither of the above can catch it - it simply never returns. The kernel's
-  budget timer preempts it at its budget boundary mid-`process_block` (issue
-  #78); the host mutes it, and after three consecutive offences kills it. This
-  is the leg that makes an *untrusted* plugin safe on the availability axis, not
-  just the memory-safety axis.
-
-## Run it
-
-The demo runs on the QEMU `virt` board (MMU on, real exception vectors,
-isolated EL0 plugins) and is verified in CI:
-
+```sh
+make test-arm-m12 CROSS_COMPILE=aarch64-linux-gnu-
 ```
+
+This builds the kernel, runs the budget/worker/accounting/process/graph/latency
+host tests with ASan/UBSan, and runs the budget, resilience, control-syscall,
+per-plugin reporting and latency QEMU harnesses. The M12 CI job invokes this
+same target. Failure is not hidden behind allowances for missed blocks.
+
+## Four-plugin resilience and resource lifecycle
+
+```sh
 make test-arm-resilience-qemu CROSS_COMPILE=aarch64-linux-gnu-
 ```
 
-It builds the four plugins as standalone AArch64 ELFs, boots the kernel demo
-harness ([`tests/arm64/virt/resilience_main.c`](../tests/arm64/virt/resilience_main.c)),
-and asserts `RESILIENCE: PASS`.
+`good` renders a 440 Hz sine. `crash` dereferences NULL. `evil` issues a forbidden
+SVC; a fresh instance initialized in its test-only kernel-write mode separately
+attempts the wild write. The kernel write is not assumed to happen after an
+already-fatal SVC. `hog` produces three normal blocks, then writes non-zero
+samples to both output planes and spins indefinitely in `process_block`.
 
-## Transcript
+The common kernel `budget_plugin_run` helper, rather than a harness-only
+counter, preempts and clears the hog's partial output. The test checks the
+first two mutes, third-strike process death, shared liveness publication,
+refusal of later process entry, and silence on post-kill invocations. All eight
+logical blocks retain good-plugin sound. Every load/run/kill/unload cycle must
+return the frame allocator to baseline, repeated ten times. Removed PIDs must
+not retain budget settings.
 
-A representative run. Each iteration logs one banner per containment: the
-`crash` data abort, the `evil` illegal-SVC kill, and the `hog`'s three budget
-preemptions ending in a budget kill.
+The resilience harness inspects the actual plugin output directly. It has no
+independent DAC cadence timer; its eight-block checks establish output and
+lifecycle correctness, not physical no-dropout audio timing.
 
-```
-=== QEMU virt resilience demo (issue #36 + #79) ===
+### Observed QEMU transcript excerpt
+
+From the verification run on 2026-09-16 (timings and allocator counts vary by
+build and machine):
+
+```text
 hog budget: 1333us of a 5333us block (fair share of 4)
-
-[exception] memory fault
-  vector : EL0 sync
-  cause  : data abort (EL0) (EC=0x24)
-  ESR=0x0000000092000046  ELR=0x0000008000000028
-  FAR=0x0000000000000000  SPSR=0x00000000000003c0
-  -> terminating EL0 process
-  [fault] terminating EL0 process pid=2 (crash) on write access
-  [sandbox] illegal SVC #1 from pid=3 (evil)
-  [budget] preempting EL0 process pid=4 (hog) at its budget boundary
-  [budget] preempting EL0 process pid=4 (hog) at its budget boundary
-  [budget] preempting EL0 process pid=4 (hog) at its budget boundary
-  [budget] kill pid=4 (hog) after 3 consecutive offences (last=1481us budget=1333us)
+  [budget] kill pid=4 (hog) after 3 consecutive offences (max=1487us budget=1333us) dead=1 mute-leaks=0
   run 1: good-audio-intact + all-three-neutralised = yes
-  ...
   run 10: good-audio-intact + all-three-neutralised = yes
-leak: baseline=32125 after-10x=32125 no-leak=1
+leak: baseline=32124 after-10x=32124 no-leak=1
 checks: passes=10/10 no-leak=1
 RESILIENCE: PASS
 ```
 
-Every iteration: `good` produced audio on all 6 blocks (no dropout); the `crash`
-and `evil` plugins were killed with logged fault info; the `hog` was preempted
-at its budget boundary on each of its three blocks (each preempted run lands
-between the 1333 us budget and the block period, proving the timer - not a
-voluntary return - stopped it), muted twice, and killed on the third offence;
-and the free-page count is unchanged after 10 iterations.
+## Concurrent audio cadence and transient recovery
 
-## Hardware capture
+```sh
+make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-
+```
 
-The reproducible QEMU harness above is the CI-verified form of the demo. A
-screen/audio capture of the same four plugins running on real Raspberry Pi
-CM4 hardware - the good plugin audible throughout while the crash, evil, and
-hog plugins are loaded and neutralised - belongs in `docs/demo/` (e.g.
-`docs/demo/resilience-cm4.mp4`) and requires a board to record.
+CPU0 services a synthetic 1 kHz audio callback; CPU1 executes `good`, `blip`
+and `hog` under finite budgets. `blip` partially writes and spins on calls three
+and four, then recovers: both bad blocks must be silent, the next clean block
+must be audible, and its strike streak resets. `hog` must terminate after
+exactly three consecutive offences; a raw attempt to run it again must fail.
+
+The assertions require **100/100 good-plugin executions, 100/100 callbacks,
+zero worker skips, zero DAC-ring underruns, and zero watchdog overruns**.
+Both minimum and maximum measured preemption times are checked: every offending
+run must finish between its budget and the block interval, not merely the
+fastest run. The test inspects actual plugin output for sound/silence, then
+feeds a marker stream into a modeled DAC ring. It is not a 48 kHz I2S loopback
+or an analog end-to-end latency measurement.
+
+Budget interrupts do not print. Service-time snapshots are published from the
+worker; UART rendering and the kill report occur after the worker drains.
+The slot's `plugin_time runs=` includes scheduled no-op visits after death;
+the separate `hog: runs=` reports actual isolated invocations.
+
+### Observed QEMU transcript excerpt
+
+```text
+audio: serviced=100 underruns=0 overruns=0 worst=5422 cyc
+worker: kicks=100 blocks=100 overruns=0
+good: runs=100 audible=100 offences=0 muted=0 killed=0
+blip: runs=100 audible=98 offences=2 muted=2 killed=0 preempt=[350,447]us
+hog: runs=6 offences=3 muted=3 killed=1 preempt=[350,363]us
+leak: baseline=32132 after=32132 no-leak=1
+checks: online=1 ctl=1 cpu0=1 worker=1 hog=1 blip=1 good=1 preempt=1 no-leak=1
+BUDGET: PASS
+```
+
+Ten additional wall-clock QEMU repetitions of this strict two-core test passed
+on the verification machine, each with zero skips/underruns/overruns. This is
+repeatability evidence, not a bound on arbitrary emulator hosts or hardware.
+
+## Control-plane and accounting regressions
+
+`test-arm-control-qemu` exercises syscall 12 from a real EL0 host controller:
+a budget above 32 bits is preserved, zero clears it, oversized values and stale
+PIDs are rejected, and 100 load/set-budget/unload cycles reclaim all resources.
+The host budget tests also exercise late normal return, exact-boundary expiry,
+fault handling, forgiveness, zero-tick clamping and counter saturation.
+
+The time-accounting board uses atomic payload fields and ordered sequence
+validation, with a bounded snapshot retry. A 100,000-publication two-thread
+host stress test checks consistent min/max/mean snapshots.
+
+## Hardware and integration boundary
+
+See [the host policy](plugin-abi.md#host-enforcement-m12-issue-78) for exclusive
+EL0-worker ownership, timer ownership, unpublished output buffers, and deferred
+resource reclamation. M12 does not implement arbitrary simultaneous EL0 calls,
+loader/init/destroy budgets, graph admission control or a complete hardware
+audio appliance boot path. Those are not implied by these passing tests.
+
+A real Raspberry Pi 4/CM4 recording and physical I2S/latency measurements remain
+M10 work. No `resilience-cm4.mp4` or hardware measurements were fabricated.

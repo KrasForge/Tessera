@@ -55,7 +55,11 @@ int plugin_init(uint32_t sample_rate, uint32_t block_size)
     res[1] = sc3(SYS_PLUGIN_SET_PARAM, pid, 5, 0x3f000000L);  /* 0.5f bits */
     res[2] = sc2(SYS_GRAPH_CONNECT, pid, GRAPH_DAC_PID);
     res[3] = sc2(SYS_GRAPH_DISCONNECT, pid, GRAPH_DAC_PID);
+    res[5] = sc2(SYS_PLUGIN_SET_BUDGET, pid, 0x100000123L); /* >32-bit */
+    res[6] = sc2(SYS_PLUGIN_SET_BUDGET, pid, 0);            /* default */
+    res[7] = sc2(SYS_PLUGIN_SET_BUDGET, pid, -1);           /* range error */
     res[4] = sc1(SYS_PLUGIN_UNLOAD, pid);
+    res[8] = sc2(SYS_PLUGIN_SET_BUDGET, pid, 100);          /* stale PID */
     return TESSERA_PLUGIN_OK;
 }
 

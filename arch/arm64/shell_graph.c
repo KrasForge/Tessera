@@ -12,7 +12,7 @@ static shell_graph_ops_t *ops_of(shell_t *sh)
 
 int sg_parse_u32(const char *s, uint32_t *out)
 {
-    if (!s || !*s)
+    if (!s || !out || !*s)
         return -1;
     uint32_t v = 0;
     if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
@@ -25,13 +25,16 @@ int sg_parse_u32(const char *s, uint32_t *out)
             else if (c >= 'a' && c <= 'f') d = (uint32_t)(c - 'a' + 10);
             else if (c >= 'A' && c <= 'F') d = (uint32_t)(c - 'A' + 10);
             else return -1;
+            if (v > (UINT32_MAX - d) / 16u) return -1;
             v = (v << 4) | d;
         }
     } else {
         for (int i = 0; s[i]; i++) {
             if (s[i] < '0' || s[i] > '9')
                 return -1;
-            v = v * 10u + (uint32_t)(s[i] - '0');
+            unsigned d = (unsigned)(s[i] - '0');
+            if (v > (UINT32_MAX - d) / 10u) return -1;
+            v = v * 10u + d;
         }
     }
     *out = v;

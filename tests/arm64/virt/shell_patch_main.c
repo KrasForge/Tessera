@@ -79,11 +79,21 @@ static void sd_format(void)
     b[510] = 0x55; b[511] = 0xAA;
 }
 static int sd_read(void *c, uint32_t lba, uint8_t *buf)
-{ (void)c; if (lba >= SD_SECTORS) return -1;
-  for (uint32_t i = 0; i < FAT_SECTOR; i++) buf[i] = g_sd[lba * FAT_SECTOR + i]; return 0; }
+{
+  (void)c;
+  if (lba >= SD_SECTORS) return -1;
+  for (uint32_t i = 0; i < FAT_SECTOR; i++)
+    buf[i] = g_sd[lba * FAT_SECTOR + i];
+  return 0;
+}
 static int sd_write(void *c, uint32_t lba, const uint8_t *buf)
-{ (void)c; if (lba >= SD_SECTORS) return -1;
-  for (uint32_t i = 0; i < FAT_SECTOR; i++) g_sd[lba * FAT_SECTOR + i] = buf[i]; return 0; }
+{
+  (void)c;
+  if (lba >= SD_SECTORS) return -1;
+  for (uint32_t i = 0; i < FAT_SECTOR; i++)
+    g_sd[lba * FAT_SECTOR + i] = buf[i];
+  return 0;
+}
 
 /* ---- ring backend: a real page so gc_connect records the edge ---- */
 static void *ring_new(void *c)

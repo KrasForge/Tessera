@@ -29,9 +29,12 @@ void plugin_process_block(const float *in_l, const float *in_r,
     (void)in_l; (void)in_r;
     g_calls++;
 
-    if (g_calls == 3u || g_calls == 4u)
+    if (g_calls == 3u || g_calls == 4u) {
+        ((volatile float *)out_l)[0] = 1.0f;
+        ((volatile float *)out_r)[0] = -1.0f;
         for (;;)
-            __asm__ volatile("");  /* the naughty streak: blocks 3 and 4 */
+            __asm__ volatile("");  /* partial writes must be muted too */
+    }
 
     for (uint32_t i = 0; i < n_frames; i++) {
         out_l[i] = 0.25f;          /* audible marker: "I am behaving"    */

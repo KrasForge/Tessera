@@ -34,22 +34,48 @@ typedef enum {
     PROC_KILLED,    /* terminated by a fault */
 } proc_state_t;
 
+/* Immutable first-fault evidence, published before process death. The DSP
+ * exception path stores registers only; UART formatting runs on control. */
+typedef struct {
+    uint64_t esr, elr, far, spsr;
+    uint32_t cpu;
+} process_fault_t;
+
 /* Process control block.  Holds the physical address of the L0 root and the
  * ASID, per the issue #11 requirement. */
 typedef struct process {
     uint32_t     pid;
     uint16_t     asid;
-    proc_state_t state;
+    _Atomic proc_state_t state; /* inspected by the serialized loader while workers run */
     uintptr_t    pgd_pa;   /* physical address of the L0 root (TTBR0_EL1)   */
     uint64_t    *pgd;      /* dereferenceable pointer to the L0 root         */
     uint64_t     ttbr0;    /* TTBR0_EL1 value: pgd_pa | (asid << 48)         */
     long         exit_code; /* sys_exit value, or -1 if killed by a fault   */
     char         name[16];
+    process_fault_t fault;
+    uint32_t     fault_valid;
     volatile uint32_t *liveness; /* shared-ring status word, or NULL (#26)   */
     uint64_t     svc_gate;  /* sandbox: if non-zero, the only page from which
                              * an SVC is honoured; an SVC from anywhere else
                              * kills the process (issue #35).  0 = ungated.   */
 } process_t;
+
+/* A process executes on one core at a time and cannot re-enter after a
+ * fault. Readers must retain its lifetime (e.g. the session control owner).
+ * No spinning, allocation, UART, syscall, or blocking lock in this path. */
+static inline void process_record_fault(process_t *p, uint32_t cpu,
+        uint64_t esr, uint64_t elr, uint64_t far, uint64_t spsr)
+{
+    if (!p || __atomic_load_n(&p->fault_valid, __ATOMIC_ACQUIRE)) return;
+    p->fault = (process_fault_t){esr, elr, far, spsr, cpu};
+    __atomic_store_n(&p->fault_valid, 1u, __ATOMIC_RELEASE);
+}
+static inline int process_fault_snapshot(const process_t *p, process_fault_t *out)
+{
+    if (!p || !out || !__atomic_load_n(&p->fault_valid, __ATOMIC_ACQUIRE)) return 0;
+    *out = p->fault;
+    return 1;
+}
 
 /* Value the kernel writes to *liveness when the process is killed; matches
  * ARB_PRODUCER_DEAD in audio_ringbuf.h so the host detects plugin death. */
@@ -73,6 +99,10 @@ process_t *process_create(const char *name);
  * frame, release the L0 root and the ASID.  Shared kernel tables are left
  * untouched. */
 void process_destroy(process_t *p);
+
+/* Neutralise a stopped process without allocating/freeing on the audio path.
+ * Publish ring death now; destroy it only once all workers have drained. */
+void process_kill(process_t *p, long code);
 
 /* Map [va, va+size) -> [pa, pa+size) into the process user space.  va must
  * lie within [USER_VA_BASE, USER_VA_END).  VMM_USER is added automatically;

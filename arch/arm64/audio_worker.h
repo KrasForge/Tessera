@@ -70,6 +70,8 @@ typedef struct {
 typedef struct audio_worker_s {
     /* ---- audio-core side (written by CPU0) ---- */
     volatile uint64_t block_seq __attribute__((aligned(64)));
+    uint32_t          publishing;      /* bit0 producer owns; bit1 pause gate */
+    uint64_t          release_ticks; /* nominal timestamp, published with seq */
     uint64_t          kicks;     /* kick attempts (published or skipped)     */
     uint64_t          overruns;  /* kicks skipped because the worker was late */
 
@@ -109,6 +111,10 @@ void aw_clear(audio_worker_t *w);
  * accounts one overrun to the worker and each assigned node, and returns 0.
  * An empty worker is not kicked (returns 1).  Never blocks, never spins. */
 int aw_kick(audio_worker_t *w, uint64_t seq);
+/* Deadline-aware variant: release_ticks is the nominal cadence deadline.
+ * Written only when a kick succeeds; a skipped kick cannot change the
+ * timestamp of a job already executing on the worker. */
+int aw_kick_at(audio_worker_t *w, uint64_t seq, uint64_t release_ticks);
 
 /* Worker side: execute one published block if there is one.  Returns 1 if a
  * block was run (completion published), 0 if there was nothing new and the
@@ -126,5 +132,13 @@ void aw_stop(audio_worker_t *w);
  * After stopping the kicker and waiting for this, blocks + overruns == kicks
  * holds exactly. */
 int aw_drained(const audio_worker_t *w);
+/* Nonblocking pause protocol. Paused is true only after a racing producer
+ * has left its publication section AND the worker has answered the last kick.
+ * Paused kicks return -1 and do not count as overruns. */
+void aw_pause(audio_worker_t *w);
+int aw_paused(const audio_worker_t *w);
+int aw_resume(audio_worker_t *w);
+int aw_quiescent(const audio_worker_t *w);
+
 
 #endif /* ARM64_AUDIO_WORKER_H */

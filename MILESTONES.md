@@ -2,7 +2,7 @@
 
 The roadmap is organised as milestones, each a small set of GitHub issues with
 a concrete **"done when"** criterion - a demo or measurement, not a feature
-list. Milestones M0-M9 (issues #1-#40) are complete; this file records what
+list. Milestones M0-M9 (issues #1-#40) and M11-M13 (#74-#82) are complete in QEMU; this file records what
 they delivered and defines the milestones ahead.
 
 Everything below M10 is verified in CI on the QEMU `virt` board (MMU on, real
@@ -78,7 +78,104 @@ for third-party authors (#39,
 [`docs/getting-started.md`](docs/getting-started.md)), and patch/preset
 persistence to SD/ramdisk (#40).
 
+### M11 - multi-core plugin scheduling (#74-#76)
+
+**Completed and regression-tested on QEMU `virt`; not hardware acceptance.**
+CPU0 owns the audio cadence while lock-free workers on CPU1-3 execute graph
+nodes. Dependency/core-aware admission chooses placements before the block
+path, graph changes publish only at drained frame boundaries, a late worker is
+skipped and attributed without blocking CPU0, and an empty worker stays parked.
+
+**Done-when evidence:** the shared-session M11 fixture runs three identical
+real EL0 jobs at 8 ms each against a 20 ms emulation frame. The same 24 ms of
+work overloads one worker, while the admitted CPU1/2/3 plan completes 129/129
+jobs per plugin with zero missing/skipped frames, deadline/budget failures, or
+CPU0 watchdog overruns. A real low-pass chain is PCM-bit-identical when split
+across cores. Crash and CPU-hog plugins are killed on CPU1, CPU2 and CPU3 while
+the survivor chain keeps producing, and allocator baselines are restored after
+every fault cycle. The original #74 stalled-worker and #75 live-rewire QEMU
+fixtures remain part of the aggregate gate.
+
+Run `make -j1 test-arm-m11 CROSS_COMPILE=aarch64-linux-gnu-`. The acceptance
+profile is deliberately a 12 kHz / 240-sample QEMU scheduling test; 48 kHz /
+64-sample hardware latency/WCET remains M10 work.
+
+### M12 - per-plugin CPU budget enforcement (#77-#79)
+
+**Completed and regression-tested on QEMU `virt`; not hardware acceptance.**
+Per-plugin time accounting and atomic seqlock snapshots report service time
+and offences. The shared `budget_plugin_run` execution path preempts EL0 at
+a finite CPU budget, erases partially written output on an offence, and
+publishes process death on the third consecutive offence. Killed processes
+cannot be re-entered; resources are reclaimed after workers drain. The host
+control syscall sets 64-bit counter-cycle budgets, and unload clears them.
+
+**Done-when evidence:** the `hog` plugin renders three blocks, then writes
+partial output and spins. It is muted and killed within three offending
+blocks; the resilience demo verifies eight good-plugin blocks per cycle and
+no frame leaks after each of ten cycles. A separate two-core timer-driven
+acceptance test requires 100/100 good-plugin blocks, zero underruns, zero
+worker skips, and zero audio-watchdog overruns. All four fault mechanisms
+(null access, wild kernel write, illegal SVC, CPU budget) are exercised.
+
+Run `make test-arm-m12 CROSS_COMPILE=aarch64-linux-gnu-` for the aggregate
+gate. See [`docs/demo.md`](docs/demo.md) for measured transcripts and
+[`docs/plugin-abi.md`](docs/plugin-abi.md#host-enforcement-m12-issue-78) for
+integration constraints. M10's physical I2S/latency measurements remain open.
+
+### M13 - interactive control shell (#80-#82)
+
+**Completed and regression-tested on QEMU `virt`; not hardware acceptance.**
+The fixed-buffer UART shell provides line editing, tokenisation, `help`, safe
+error handling and fuzz-tested malformed-input containment. The graph/session
+commands expose load/unload, wire/unwire, live parameters, graph/parameter
+listing, runtime stats, temporal contracts/core placement, and persistent
+session save/load/list operations without recompiling a control program.
+
+**Done-when evidence:** the original #80 fixture runs the shell on CPU1 while
+CPU2 emits periodic `audio_latency:` records through the shared UART and CPU0
+records zero overruns. The #81 fixture builds `synth -> filter -> DAC` entirely
+from console input and produces real plugin audio. The #82 fixture saves the
+patch, tears down the graph, reloads it from FAT and reproduces the exact DAC
+hash. The production workstation additionally exports only the FAT storage,
+exits QEMU, boots a new emulator process, reloads the saved session and requires
+bit-identical PCM. Malformed/missing/partially loadable sessions emit exactly
+one error line, retain the old graph/audio, and `ls` reports live parameter
+values while `patch ls` filters out plugin ELF files.
+
+Run `make -j1 test-arm-m13 CROSS_COMPILE=aarch64-linux-gnu-`. The production
+cold-boot acceptance uses a 12 kHz / 240-sample (20 ms) QEMU functional profile
+with all zero-miss/zero-offence assertions intact; the 48 kHz / 64-sample stress
+profile and physical serial/EMMC2/SD/I2S timing validation remain M10 work.
+
 ---
+
+### M12 extension — admitted temporal contracts
+
+The kernel also provides a frame-synchronous temporal host with independent
+per-plugin block-multiple periods, within-frame deadlines, HARD/SOFT/BEST_EFFORT
+classes, precedence-constrained EDF within each class, five configurable output
+policies, and transactional graph admission. Both relative budgets and absolute
+cutoffs interrupt actual EL0 calls. See
+[`docs/temporal-contracts.md`](docs/temporal-contracts.md) for the supported
+model, integration contract and limits; run `make test-arm-temporal-all`.
+This does not imply arbitrary-release EDF, adaptive DSP quality, gapless
+live graph rewiring or physical-hardware acceptance. The managed integration
+below adds concurrent independent EL0 hosts and safe paused topology changes.
+
+
+## M11/M13 integrated software delivery
+
+The multicore temporal scheduler and interactive serial workstation are now
+implemented together. Core/dependency-aware admission, isolated workers,
+frame-boundary live graph replacement, guarded reclamation, contract/parameter
+commands, and versioned persistent sessions share one execution engine.
+`make test-arm-m11` and `make test-arm-m13` are the dedicated gates;
+`make test-arm-m11-m13` remains the combined software gate.
+`make run-arm-workstation` starts the serial application. See
+[`docs/m11-m13-workstation.md`](docs/m11-m13-workstation.md) for commands,
+verification scope, and the distinction from physical CM4/I2S acceptance.
+Hardware integration is not implied by the software delivery.
 
 ## Next up
 
@@ -114,41 +211,6 @@ cheap - see [`docs/hardware-targets.md`](docs/hardware-targets.md).
 ---
 
 ## Planned
-
-### M11 - multi-core plugin scheduling (#74-#76)
-
-The audio core owns CPU0; today the rest of the graph shares it. CPU1-3 are
-idle capacity. Schedule graph nodes across the secondary cores with
-topology-aware ordering (a node runs only after its upstream edges have
-produced), keeping CPU0's cadence untouched.
-
-**Done when:** a graph that demonstrably overruns on a single core runs
-without overruns when spread across CPU1-3, and killing a plugin on any core
-disturbs neither the audio cadence nor plugins on other cores.
-
-### M12 - per-plugin CPU budget enforcement (#77-#79)
-
-The sandbox contains memory (MMU) and syscalls (SVC gate), but a plugin that
-spins forever in `process_block` still starves the graph - the watchdog only
-observes the global overrun. Account time per plugin per block, give each
-plugin a budget, and neutralize (mute, then kill) a plugin that repeatedly
-exceeds it. This extends isolation from memory safety to time safety and
-completes the untrusted-plugin story.
-
-**Done when:** a `hog` test plugin (infinite loop in `process_block`) joins
-`crash` and `evil` in the resilience demo and is detected and killed within a
-bounded number of blocks while the good plugin never misses one.
-
-### M13 - interactive control shell (#80-#82)
-
-Today the control plane is C code calling syscalls (#30) and patch files
-(#40). Provide a serial shell over UART: `load` / `unload` / `wire` /
-`unwire` / `set-param`, `patch save` / `patch load`, plus `ls` for the graph
-and `stats` for the latency counters.
-
-**Done when:** a user with nothing but a serial terminal can build a patch
-from plugins on the SD card, tweak parameters live, save it, reboot, and
-reload it - without compiling any C.
 
 ### M14 - audio input (#83-#85)
 
@@ -190,3 +252,16 @@ commitment, just a place to draw from:
   (never-go-silent reliability, DSP building blocks, timing, routing, control,
   the plugin ecosystem) grouped by theme, with the isolation-differentiating
   ones flagged.
+
+
+### M12 managed integration completion
+
+The temporal runtime now manages admitted load/start/pause/rewire/unload,
+bounded ABI/init/parameter/destructor calls and rollback on failures. EL0
+return/current-process/budget state is per core, including nested-call FP
+preservation. A four-core QEMU gate runs two independent DSP hosts with a
+simultaneous trusted EL0 control client. See
+[`docs/temporal-contracts.md`](docs/temporal-contracts.md) for the supported
+frame-synchronous model and `docs/temporal-runtime-verification.md` for results.
+Physical board acceptance remains M10; gapless topology replacement and
+cross-core partitioning of one graph are not implied by this integration.

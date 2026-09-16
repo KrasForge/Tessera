@@ -55,6 +55,9 @@ uint32_t arm64_abort_fsc(uint64_t esr)
 
 #include "uart_pl011.h"
 
+/* Optional budget module; absent in standalone exception harnesses. */
+extern int budget_active(void) __attribute__((weak));
+
 extern char vectors[];
 
 /* Provided strongly by arch/arm64/syscalls.c (weak default below). */
@@ -135,6 +138,14 @@ void arm64_exception(struct trapframe *tf, unsigned long kind)
     }
 
     int from_el0 = (kind >= 8);
+
+    /* UART polling in a malicious plugin's fault path would evade temporal
+     * containment while EL1 masks IRQs. The scheduler records the fault and
+     * reports it off-core; do not dump registers in this bounded window. */
+    if (from_el0 && ec != EC_SVC_A64 && budget_active && budget_active()) {
+        arm64_user_fault(tf);
+        return;
+    }
 
     switch (arm64_ec_class(ec)) {
     case EC_CLASS_SVC:
