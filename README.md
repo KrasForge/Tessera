@@ -1,96 +1,87 @@
 # Tessera
 
-**A bare-metal AArch64 audio platform for running third-party DSP plugins as isolated processes.**
+**A bare-metal AArch64 audio runtime that treats every DSP plugin as untrusted code.**
 
-Tessera is built around one idea: loading an audio plugin should not mean trusting it
-with the whole instrument. Each plugin runs at EL0 in its own ARMv8 virtual address
-space, with host-enforced CPU budgets and a syscall gate. A bad pointer, an illegal
-syscall, or an infinite DSP loop is contained to that plugin instead of taking down
-the audio engine.
+Tessera is an experimental kernel plus plugin platform for a Cortex-A audio device
+(target: a Raspberry Pi Compute Module 4 driving a PCM5102 DAC, i.e. a programmable
+stompbox or desktop instrument). Its one core idea is that **loading a plugin should
+not mean trusting it with the whole instrument**. A plugin is an ordinary AArch64 ELF.
+It runs at EL0 in its own ARMv8 address space, under a CPU-time budget enforced by the
+generic timer, and it can't make syscalls from its DSP path. If a plugin dereferences a
+wild pointer, issues an illegal `SVC`, or spins forever, only that plugin is killed.
+The audio engine and the other plugins keep running.
 
-The result is a small real-time audio OS with a plugin SDK, multicore graph scheduler,
-serial workstation, persistent patches, MIDI/transport support, and a growing DSP
-library—all without Linux underneath the runtime.
-
-> **Current status:** the software platform is extensively verified on QEMU `virt`,
-> including real EL0 plugin execution, MMU faults, budget preemption, multicore DSP,
-> graph mutation, persistence, and serial control. **Physical CM4/Pi 4 acceptance is still incomplete**: real BCM2711 boot/SD,
-> I2S+DMA, and measured hardware latency are not yet claimed complete.
-
----
-
-## Why Tessera exists
-
-A conventional native audio host usually shares one process or one kernel with all
-plugin code. Tessera instead treats a plugin as untrusted code and gives it explicit
-resource boundaries:
-
-- **Memory isolation** — a separate translation table per plugin; kernel memory,
-  MMIO, and other plugins are unmapped.
-- **Time isolation** — `process_block` executes under a generic-timer budget; a DSP
-  loop can be interrupted, muted, and eventually killed.
-- **Syscall isolation** — plugin-body `SVC` is forbidden; the host controls every
-  kernel transition.
-- **Memory and I/O quotas** — plugin footprint and syscall/I/O rate can be bounded
-  independently of CPU time.
-- **Failure containment** — MMU faults, illegal syscalls, and CPU-budget violations
-  terminate only the offending plugin; graph fallback can keep audio flowing.
-
-That makes isolation part of the audio architecture rather than an add-on around a
-single trusted process.
+There is no Linux, libc, or dynamic linker underneath. The kernel is roughly 20,000
+lines of freestanding C and assembly: the MMU and process code, an ELF loader, an audio
+graph, a real-time scheduler, a FAT filesystem, and a serial shell. It ships with a
+plugin SDK (C and Rust) and a library of allocation-free DSP blocks for plugin authors.
 
 ---
 
-## What works today
+## Status at a glance
 
-### Isolated plugin runtime
+| Question | Answer |
+| --- | --- |
+| Does it run? | **Yes, under QEMU `virt`** (4× Cortex-A72, MMU on, real exception vectors, real EL0 plugins). |
+| Does it run on a Raspberry Pi / CM4? | **Not yet.** Nothing has been validated on real BCM2711 silicon. That work is tracked in [#105](https://github.com/KrasForge/Tessera/issues/105)–[#108](https://github.com/KrasForge/Tessera/issues/108). |
+| Can I hear it? | **No.** QEMU doesn't emulate the BCM2711 I2S block. The emulated workstation renders PCM into memory, and tests check it by sample value and hash. Nothing plays through speakers. |
+| Is the isolation real? | **Yes.** Each plugin gets its own translation tables, runs at EL0, and is preempted by the timer. Faults are handled by the kernel's real exception path, and QEMU tests exercise every fault class. |
+| Is it a product? | **No.** It's a working, heavily tested architecture in emulation. It isn't a finished pedal, and it makes no claims about measured hardware latency. |
 
-Tessera loads self-contained AArch64 ELF plugins into separate EL0 address spaces.
-The host validates the image and ABI, maps code/data with the correct permissions,
-and enters plugin callbacks through a controlled trampoline. The plugin ABI is stable
-at major version 1 and currently includes backward-compatible event/transport
-extensions through **v1.3**.
+---
 
-The runtime includes:
+## What Tessera is
 
-- load / unload / parameter updates at run time;
-- MMU fault containment and plugin liveness publication;
-- timer-enforced per-plugin CPU budgets and escalation policies;
-- memory-footprint quotas and syscall/I/O-rate quotas;
-- bounded lifecycle calls and rollback on failed load/admission;
-- safe reclamation only after workers have drained.
+### 1. An isolation-first plugin runtime
 
-See [`docs/plugin-abi.md`](docs/plugin-abi.md) and
-[`docs/temporal-contracts.md`](docs/temporal-contracts.md).
+Plugin isolation is part of the audio architecture itself, not a wrapper around one
+trusted process:
 
-### Real-time graph and multicore scheduling
+- **Memory isolation.** Each plugin gets a separate translation root. Kernel memory,
+  MMIO, and other plugins are unmapped, and code and data are mapped W^X. The host maps
+  audio buffers, the parameter queue, and the event queue in explicitly.
+- **Time isolation.** `plugin_process_block` runs under a generic-timer budget. An
+  overrunning block is interrupted, and its partial output is erased. Three offences in
+  a row kill the plugin.
+- **Syscall isolation.** An `SVC` from the plugin body is fatal. All kernel transitions
+  go through a host-controlled trampoline, and the DSP path makes no syscalls per block.
+- **Validated loading.** ELF images are bounds-checked and ABI-version-checked before
+  anything is mapped. Images with undefined imports are rejected. A failed load or
+  admission rolls back completely.
+- **Safe teardown.** A killed process can't be re-entered, and its resources are freed
+  only after the worker cores have drained. The resilience test checks for zero frame
+  leaks over repeated fault cycles.
 
-CPU0 owns the audio cadence while isolated DSP jobs run on worker cores. The temporal
-runtime admits a graph before execution using per-plugin periods, deadlines, budgets,
-criticality, dependencies, and optional core affinity. Same-frame cross-core edges use
-bounded handoff rather than allowing a worker to stall the audio core.
+The plugin ABI is frozen at major version 1 (five C exports). It has grown by
+backward-compatible minor versions up to **v1.3**, which added note/CC events, a
+transport snapshot, MPE, and sample-accurate event offsets. See
+[`docs/plugin-abi.md`](docs/plugin-abi.md) and [`CHANGELOG.md`](CHANGELOG.md).
 
-Implemented pieces include:
+### 2. A real-time, multicore audio engine
 
-- dependency-aware CPU1-3 placement and per-core execution;
-- HARD / SOFT / BEST_EFFORT temporal contracts;
-- mute, bypass, kill, strike-based kill, and degrade policies;
-- frame-boundary graph replacement with guarded reclamation;
-- feedback edges and plugin delay compensation;
-- per-plugin runtime counters and service-time snapshots;
-- live reconfiguration without doing ELF loading or filesystem work in the audio IRQ.
+CPU0 owns the audio cadence and the graph. Plugins run as isolated jobs on worker
+cores. Before anything executes, a temporal runtime admits the graph against each
+plugin's contract:
 
-The strict multicore QEMU fixture proves that work which overruns one worker can execute
-across CPU1-3 while CPU0 keeps cadence, and exercises crash/hog containment on every
-worker core.
+- period (in whole blocks), within-frame deadline, CPU budget, and criticality class
+  (HARD / SOFT / BEST_EFFORT);
+- precedence-constrained EDF within each class, dependency-aware placement on CPU1-3,
+  and optional core pinning;
+- per-plugin overrun policies: mute, bypass, kill, kill after N strikes, or degrade;
+- graph changes published only at drained frame boundaries, with guarded reclamation of
+  the old graph;
+- feedback edges, plugin delay compensation, and seqlock-published per-plugin
+  service-time counters.
 
-See [`docs/temporal-contracts.md`](docs/temporal-contracts.md) and
-[`docs/shell.md`](docs/shell.md).
+A late worker is skipped and the miss is attributed to it; CPU0 is never made to wait.
+See [`docs/temporal-contracts.md`](docs/temporal-contracts.md) for the exact model and
+its limits.
 
-### Interactive workstation
+### 3. A serial workstation
 
-Tessera can be driven from a serial terminal rather than from a compiled control
-program. The managed shell exposes graph, scheduling, and persistence operations:
+The integrated application is a 4-core QEMU image. CPU0 runs audio, CPU1-2 run DSP,
+and CPU3 runs a UART shell. From that shell you can build and manage a live graph
+without compiling a control program:
 
 ```text
 load /sd/SYNTH.ELF
@@ -108,242 +99,197 @@ ls
 patch save /sd/LIVE.TSP
 ```
 
-`patch load` reconstructs plugin paths, parameters, contracts, affinity, and wiring.
-The serial-workstation acceptance test saves a session to a FAT image, terminates QEMU, boots a new
-emulator process with only that storage restored, reloads the patch, and requires
-bit-identical PCM output.
+`/sd` is a RAM-backed FAT volume that is preloaded at boot with the bundled plugin
+ELFs. In this image, `SYNTH.ELF` is a 440 Hz sine test plugin. `patch load` rebuilds
+plugins, parameters, contracts, affinity, and wiring. The acceptance test saves a
+session, shuts QEMU down, boots a fresh emulator with only the FAT image restored,
+reloads the patch, and requires bit-identical PCM output. See
+[`docs/shell.md`](docs/shell.md) and
+[`docs/m11-m13-workstation.md`](docs/m11-m13-workstation.md).
 
-See [`docs/shell.md`](docs/shell.md).
-### Plugin SDK and DSP library
+### 4. A plugin SDK and DSP library
 
-Third-party plugins need only the self-contained [`sdk/`](sdk/) directory and a stock
-AArch64 toolchain. The SDK provides the ABI header, link script, static helper library,
-reference plugin, C build template, and a Rust wrapper.
+Plugin authors need only [`sdk/`](sdk/) and a stock AArch64 toolchain. The SDK includes
+the ABI header, a W^X link script, a static helper library, a C build template, an
+example plugin, and a `no_std` Rust wrapper
+([`sdk/rust/tessera-plugin`](sdk/rust/tessera-plugin)). The
+[offline host](tools/offline_host.c) runs a plugin against a WAV file on your desktop,
+with no board or QEMU needed.
 
-`libtessera.a` now includes real-time-safe, allocation-free building blocks such as:
+`libtessera.a` is real-time safe: no allocation, no libc. It provides:
 
-- smoothers, biquads, SVFs, ADSRs, delay lines, envelope followers;
-- polyBLEP, wavetable, and FM oscillators;
-- streaming sample playback and a polyphonic synth voice engine;
+- smoothers, RBJ biquads, SVFs, ADSRs, delay lines, envelope followers;
+- polyBLEP, wavetable, and FM oscillators; a streaming sampler; a polyphonic voice engine;
 - compressor, EQ, gate, chorus, delay, overdrive, and FDN reverb;
-- FFT/rFFT, partitioned convolution, phase vocoder/pitch shift, spectrum analysis;
-- modulation matrix, MPE helpers, and sample-accurate event splitting;
-- fixed-memory sample-rate conversion and other utility DSP.
+- FFT/rFFT, partitioned convolution, a phase vocoder (pitch shift and time stretch),
+  and a spectrum analyser;
+- a modulation matrix, MPE decoding, and a sample-accurate event splitter.
 
-The point is not to turn the kernel into a DAW. These live in the SDK so plugin authors
-can build useful instruments and effects without giving up the isolation model.
+These live in the SDK, not the kernel, so plugins get useful DSP without weakening
+isolation. The in-tree [`synth_fm`](plugins/synth_fm), [`sampler`](plugins/sampler),
+and [`effect_filter`](plugins/effect_filter) plugins are built on them. Start with
+[`docs/getting-started.md`](docs/getting-started.md).
 
-Start with [`docs/getting-started.md`](docs/getting-started.md) or
-[`sdk/README.md`](sdk/README.md).
+---
 
-### Reliability and performance features
+## How mature each part is
 
-The repository also contains higher-level reliability work built on top of the sandbox:
+Tessera has a lot of code, and not all of it is equally connected. The table below says
+honestly where each piece stands.
 
-- safe-mode dry bypass when an effect dies;
-- glitch-free crossfaded patch switching;
-- isolated plugin hot-reload with no silent block;
-- persistent crash black-box recording;
-- signed plugin packages and revocation support;
-- secure/measured-boot primitives;
-- parser fuzzing, golden-audio regression, chaos-mode fault injection, and TSan queue checks.
+| Tier | What's in it |
+| --- | --- |
+| **Integrated: runs in the workstation image** (`make run-arm-workstation`) | MMU and processes, exception vectors, ELF loader, SVC gate, sandbox audit, CPU-budget enforcement, temporal admission and multicore workers, audio graph, lock-free parameter queues, plugin manager, FAT/VFS, patches and sessions, shell. |
+| **Proven in dedicated QEMU fixtures** (real kernel code on QEMU `virt`, but not yet linked into the workstation) | Per-plugin memory quota at load time, safe-mode dry bypass, crossfaded patch switching, plugin hot-reload, crash black-box, live parameter IPC, MIDI and CV/Gate input paths, audio-input graph nodes and input→effect→output round trip, callback latency and jitter measurement. The BCM2711 I2S and DMA drivers are exercised only as an API smoke test against scratch RAM, because QEMU has no I2S block. |
+| **Host-tested building blocks** (portable C, unit-tested with ASan/UBSan, not wired into any running image) | Master transport, tempo sync and tap tempo, arpeggiator, looper, scene morphing, mixer, limiter, profiler, patch banks with Program Change, control-surface mapping with MIDI learn, an OSC remote-editor codec, multichannel routing, linear and polyphase-FIR sample-rate conversion, syscall/I/O-rate quota accounting (the kernel hook is a no-op by default), and OLED UI layout (no display driver). Also: **USB audio**, which is UAC1 descriptor parsing and isochronous framing only, with no USB host controller driver. **Plugin packages**, which is a verifier for HMAC-SHA256 (symmetric) and key revocation, not in the load path. **Secure/measured boot**, which is image verification and a PCR-style hash chain, not in the boot path. |
+| **Pi image** (`make arm` → `kernel8.img`) | Boots, prints the UART banner, enables the MMU, runs the M1-M4 self-tests (processes, faults, scheduler, audio, and timer), and blinks the CM4 LED. It doesn't run the plugin host or the workstation yet, and it hasn't been booted on real hardware. |
 
-These mechanisms are useful because a contained failure leaves enough of the system
-alive to recover, bypass, report, or replace the failed component.
-
-See [`docs/reliability.md`](docs/reliability.md) and [`docs/demo.md`](docs/demo.md).
-
-### Musical control and audio I/O model
-
-Tessera includes MIDI/CV control paths, a master musical transport, tempo sync,
-arpeggiation, MPE/per-note expression, sample-accurate events, scene morphing, looping,
-audio-input graph nodes, multi-channel configuration, USB-audio support, and software
-sample-rate conversion. QEMU harnesses exercise these data paths; the corresponding
-physical CM4 audio-I/O acceptance is still pending.
+Wiring the building blocks into the workstation, and bringing the whole thing up on
+the BCM2711, is the remaining path from "architecture" to "instrument".
 
 ---
 
 ## Architecture
 
 ```text
-                    trusted kernel / host
+                        trusted kernel (EL1)
 
-        audio cadence + graph ownership + admission
-                         CPU0
-                          |
-                  frame-boundary kick
-                 /         |         \
-             worker      worker      worker/control
-              CPU1        CPU2          CPU3
-                |           |
-             EL0 PID A   EL0 PID B
-            +---------+ +---------+
-            | private | | private |
-            | VA space| | VA space|
-            +---------+ +---------+
-                \           /
-             trusted audio buffers
-                      |
-                    DAC sink
+         audio cadence · graph ownership · admission · fault handling
+                               CPU0
+                                |
+                       frame-boundary kick
+                     /          |          \
+                 worker       worker      control
+                  CPU1         CPU2      CPU3 (shell, file I/O,
+                   |            |         ELF loading, printing)
+               EL0 PID A    EL0 PID B
+              +---------+  +---------+
+              | private |  | private |
+              | VA space|  | VA space|
+              +---------+  +---------+
+                    \          /
+             host-mapped audio buffers
+                         |
+                      DAC sink
 ```
 
-Each plugin gets its own translation root and cannot address another plugin or kernel
-memory. Audio/control buffers are explicitly mapped by the host. The kernel owns
-lifecycle, graph publication, timer enforcement, and fault handling; untrusted plugin
-code never becomes privileged.
+The kernel owns lifecycle, graph publication, timer enforcement, and fault handling.
+Plugin code never becomes privileged. ELF parsing, filesystem access, and
+initialization run on the control core, never in the audio IRQ.
 
 ---
 
 ## Quick start
 
-### Build the AArch64 image
-
-LLVM is the default cross-toolchain:
-
-```sh
-make arm-install-deps   # Ubuntu/Debian: clang, lld, llvm, binutils
-make arm
-```
-
-This produces:
-
-```text
-build/arm/kernel8.elf
-build/arm/kernel8.img
-```
-
-A GNU cross-toolchain works as well:
-
-```sh
-make arm CROSS_COMPILE=aarch64-linux-gnu-
-# or: CROSS_COMPILE=aarch64-none-elf-
-```
-
-See [`docs/build-arm.md`](docs/build-arm.md) for the bare-metal image and CM4 boot
-layout.
-
-### Run a plugin under QEMU
-
-Install QEMU and the packaged GNU AArch64 toolchain, then run the SDK acceptance:
+### Run the workstation (QEMU)
 
 ```sh
 sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-system-arm
-make test-arm-sdk-qemu CROSS_COMPILE=aarch64-linux-gnu-
-```
-
-The test boots Tessera on QEMU `virt`, loads a real plugin ELF into an isolated EL0
-process, runs its DSP callback, and verifies audio plus parameter control.
-
-### Run the serial workstation
-
-```sh
 make run-arm-workstation CROSS_COMPILE=aarch64-linux-gnu-
 ```
 
-From the QEMU serial console, use `help`, `load`, `wire`, `set-param`, `contract`,
-`pin`, `stats`, `ls`, `patch save`, and `patch load` to build and manage a running
-patch without recompiling a control program.
+At the prompt, type `help`. `inspect` shows real PCM samples and a block hash, and
+`quit` exits.
+
+### Run a third-party-style plugin under QEMU
+
+```sh
+make test-arm-sdk-qemu CROSS_COMPILE=aarch64-linux-gnu-
+```
+
+This builds a plugin with only the SDK, boots Tessera, loads the plugin into an isolated
+EL0 process, and checks its audio output and parameter control.
+
+### Build the Pi image
+
+```sh
+make arm-install-deps   # Ubuntu/Debian: clang, lld, llvm, binutils
+make arm                # LLVM by default → build/arm/kernel8.img
+make arm CROSS_COMPILE=aarch64-linux-gnu-   # or a GNU cross-toolchain
+```
+
+See [`docs/build-arm.md`](docs/build-arm.md) for the CM4 boot layout and
+[`docs/hardware.md`](docs/hardware.md) for the DAC, MIDI, and CV wiring.
 
 ---
 
 ## Verification
 
-Useful feature-level gates include:
-
-```sh
-make -j1 test-arm-temporal-all CROSS_COMPILE=aarch64-linux-gnu-
-make -j1 test-arm-resilience-qemu CROSS_COMPILE=aarch64-linux-gnu-
-make -j1 test-arm-shell-qemu CROSS_COMPILE=aarch64-linux-gnu-
-make -j1 test-arm-shell-graph-qemu CROSS_COMPILE=aarch64-linux-gnu-
-make -j1 test-arm-shell-patch-qemu CROSS_COMPILE=aarch64-linux-gnu-
-make -j1 test-arm-session-console CROSS_COMPILE=aarch64-linux-gnu-
-```
+Almost every subsystem has its own `make test-arm-*` target, either a host unit suite
+under ASan and UBSan or a QEMU `virt` fixture. CI runs them. The main gates:
 
 | Gate | What it proves |
 | --- | --- |
-| `test-arm-temporal-all` | temporal contracts, admission, lifecycle races, timer enforcement, real-EL0 execution |
-| `test-arm-resilience-qemu` | MMU / kernel-write / illegal-SVC / CPU-hog containment with leak checks |
-| `test-arm-shell-qemu` | serial shell safety and shared-UART behavior |
-| `test-arm-shell-graph-qemu` | console graph construction and real plugin audio |
-| `test-arm-shell-patch-qemu` | console patch save/reload and identical output |
-| `test-arm-session-console` | managed multicore serial session, persistence, and true two-process cold boot |
+| `test-arm-resilience-qemu` | null-access, kernel-write, illegal-SVC, and CPU-hog plugins are killed while a good plugin keeps producing, with no leaks over 10 cycles |
+| `test-arm-temporal-all` | contracts, admission, lifecycle races, timer enforcement, and real-EL0 execution |
+| `test-arm-m11` | three real EL0 jobs spread across CPU1-3 with zero missed frames; fault containment on every worker core |
+| `test-arm-m13` | shell safety, a console-built graph producing real plugin audio, and patch save/reload with an identical DAC hash |
+| `test-arm-session-console` | a full workstation session, persistence, and a true two-process cold boot |
+| `verify-plugin-abi` | in-tree plugins conform to the frozen ABI |
 
-Host tests use sanitizers extensively, and dedicated race tests exercise the lock-free
-queues under ThreadSanitizer.
-
-Some QEMU scheduling tests intentionally use a longer emulation frame than the product
-48 kHz profile so host-vCPU descheduling is not mistaken for Cortex-A72 WCET evidence.
-The assertions on missing/skipped frames, faults, graph state, and PCM correctness remain
-strict. Physical timing numbers must come from the board.
+The QEMU scheduling fixtures use a 12 kHz / 240-sample (20 ms) frame, not the product
+48 kHz / 64-sample profile. This keeps host-vCPU descheduling from being mistaken for a
+Cortex-A72 deadline miss. The assertions on missed frames, faults, graph state, and PCM
+stay strict, but none of it counts as hardware timing evidence. Real latency and jitter
+numbers have to come from the board ([`docs/latency.md`](docs/latency.md)).
 
 ---
 
-## Project status
+## Road to hardware
 
-The software platform is broadly complete and heavily exercised under QEMU, including
-audio capture/input/round-trip coverage, multicore scheduling, temporal enforcement,
-persistent sessions, and the current SDK/DSP stack.
+The thesis (MMU-isolated plugins on a Cortex-A audio device) still needs to be shown on
+real silicon:
 
-The major unfinished work is **proving the platform on real BCM2711 hardware**.
-The remaining tracked hardware/integration work is:
+- [#105](https://github.com/KrasForge/Tessera/issues/105): Pi 4 / CM4 boot, interrupts,
+  serial, mailbox, and EMMC2/SD bring-up;
+- [#106](https://github.com/KrasForge/Tessera/issues/106): 48 kHz I2S + DMA to the
+  PCM5102 with sustained zero-underrun playback;
+- [#107](https://github.com/KrasForge/Tessera/issues/107): QEMU `raspi4b` as a required
+  BCM2711 CI gate;
+- [#108](https://github.com/KrasForge/Tessera/issues/108): published CM4 latency and
+  jitter numbers, plus a recorded physical fault-containment demo.
 
-- [#105](https://github.com/KrasForge/Tessera/issues/105) — complete Pi 4 / CM4 boot,
-  interrupt, serial, mailbox, and EMMC2/SD bring-up on real silicon;
-- [#106](https://github.com/KrasForge/Tessera/issues/106) — real 48 kHz I2S + DMA output
-  to the PCM5102 with sustained zero-underrun playback;
-- [#107](https://github.com/KrasForge/Tessera/issues/107) — make QEMU `raspi4b` a required
-  BCM2711-path CI gate;
-- [#108](https://github.com/KrasForge/Tessera/issues/108) — publish CM4 latency/jitter
-  measurements and record the physical fault-containment demo.
-
-Until those are done, Tessera should be read as a **working and heavily tested bare-metal
-audio architecture in emulation**, not as a finished CM4 product or a claim of measured
-hardware real-time performance.
-
-See the `docs/` directory for design notes, acceptance evidence, and hardware plans.
+[`MILESTONES.md`](MILESTONES.md) has the history and the done-when criteria.
+[`docs/hardware-targets.md`](docs/hardware-targets.md) and
+[`docs/feature-ideas.md`](docs/feature-ideas.md) cover longer-range ideas.
 
 ---
 
 ## Repository map
 
 ```text
-arch/arm64/   kernel architecture, MMU/processes, graph/runtime, scheduling
-boot/         AArch64 boot entry and Pi boot configuration
-drivers/      UART, GIC, timer-facing hardware support, I2S/DMA/platform I/O
-include/      public kernel/plugin ABI headers
-plugins/      reference and adversarial test plugins
-sdk/          standalone plugin SDK, DSP library, examples, Rust wrapper
+arch/arm64/   kernel: MMU/processes, loader, sandbox, graph, temporal scheduler,
+              session/shell, and the host-tested building blocks
+boot/         AArch64 boot entry and Pi config.txt
+drivers/      PL011 UART, GIC, GPIO, mailbox, BCM2711 I2S/DMA, MIDI UART, SPI
+audio/        sine generator used by bring-up and test plugins
+include/      public plugin ABI header
+plugins/      reference plugins (synth, sampler, filter, gain…) and adversarial ones
+sdk/          standalone plugin SDK, DSP library, C example, Rust wrapper
+tests/        host unit suites, QEMU virt fixtures, golden-audio references
+tools/        offline WAV plugin host, golden-audio checker
 scripts/      QEMU timing and workstation acceptance runners
-tests/        host, sanitizer, concurrency, and QEMU integration tests
-tools/        offline/developer tooling
-docs/         ABI, hardware, shell, reliability, timing, and design references
+docs/         ABI, shell, temporal model, reliability, hardware, and verification notes
 ```
-
----
 
 ## Documentation
 
-- **Write a plugin:** [`docs/getting-started.md`](docs/getting-started.md)
+- **Write a plugin:** [`docs/getting-started.md`](docs/getting-started.md), [`sdk/README.md`](sdk/README.md)
 - **Plugin contract:** [`docs/plugin-abi.md`](docs/plugin-abi.md)
-- **SDK and DSP blocks:** [`sdk/README.md`](sdk/README.md)
-- **Serial workstation:** [`docs/shell.md`](docs/shell.md)
+- **Serial workstation:** [`docs/shell.md`](docs/shell.md), [`docs/m11-m13-workstation.md`](docs/m11-m13-workstation.md)
 - **Temporal contracts:** [`docs/temporal-contracts.md`](docs/temporal-contracts.md)
 - **Fault containment demo:** [`docs/demo.md`](docs/demo.md)
 - **Reliability mechanisms:** [`docs/reliability.md`](docs/reliability.md)
+- **Signal I/O, transport, control:** [`docs/signal-io.md`](docs/signal-io.md), [`docs/transport.md`](docs/transport.md), [`docs/control-surface.md`](docs/control-surface.md)
 - **Latency methodology:** [`docs/latency.md`](docs/latency.md)
-- **Hardware wiring/targets:** [`docs/hardware.md`](docs/hardware.md), [`docs/hardware-targets.md`](docs/hardware-targets.md)
-
----
+- **Hardware:** [`docs/hardware.md`](docs/hardware.md), [`docs/hardware-targets.md`](docs/hardware-targets.md)
 
 ## Origin
 
-Tessera began as a fork of [IKOS](https://github.com/Ikey168/ikos). The old x86 teaching-OS
-tree has since been removed from the active source tree; its history remains in Git. What
-survived conceptually is the small-kernel/process-isolation approach. The hardware layer,
-audio engine, AArch64 process/runtime code, plugin platform, scheduler, and SDK are the
-Tessera-specific system built on top of that starting point.
-
----
+Tessera started as a fork of [IKOS](https://github.com/Ikey168/ikos), an x86 teaching
+OS. That tree has been removed; its history remains in Git. What carried over is the
+small-kernel, process-isolation mindset. The AArch64 kernel, audio engine, plugin
+platform, scheduler, and SDK are Tessera's own.
 
 ## License
 
