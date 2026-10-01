@@ -9,6 +9,13 @@ The filter is a Chamberlin state-variable filter (a simple 2-pole IIR).
 `process_block` is real-time-safe: a bounded loop of multiplies and adds over
 static state, with no allocation, no locks, and no syscalls.
 
+## Listen
+
+[`synth_fm` into this filter](../../docs/media/demo-chain.mp3?raw=true): an FM pad
+with the cutoff swept 180 Hz → 6 kHz → 180 Hz at Q 2.5. It was rendered by the
+offline host from both plugins' own C, not recorded from QEMU or a board (see
+[Hear it](../../README.md#hear-it)).
+
 ## ABI surface
 
 | symbol                  | when                          | real-time safe |
