@@ -73,45 +73,34 @@ by the [offline host](tools/offline_host.c). The offline host compiles the plugi
 for the desktop and drives it through the same ABI entry points the kernel calls
 (`plugin_init`, `plugin_set_param`, `plugin_process_block`), block by block, from an
 automation script. They were **not** recorded from QEMU or from a board. After
-rendering, each clip was only normalised to −1 dBFS peak and encoded to MP3. There is
-no EQ, compression, reverb, or mixing. Click a spectrogram to play its clip.
+rendering, each clip was only normalised to −1 dBFS peak and encoded (MP3, and AAC in
+the videos). There is no EQ, compression, reverb, or mixing. Each video shows the
+clip's waveform and spectrogram with a moving playhead.
 
-<p>
-  <a href="docs/media/demo-bell.mp3?raw=true">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-bell-dark.png">
-      <img alt="Waveform and spectrogram of the synth_fm Bell demo: an Am-F-C-G arpeggio with bright, inharmonic FM partials reaching well above 10 kHz. Click to play." src="docs/media/demo-bell-light.png">
-    </picture>
-  </a>
-</p>
+**Bell.** `synth_fm` with its embedded factory Bell preset (2-operator FM, ratio 3.5,
+index 5), playing an arpeggio on the SDK's 8-voice engine.
+[MP3](docs/media/demo-bell.mp3?raw=true)
 
-<p>
-  <a href="docs/media/demo-bass.mp3?raw=true">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-bass-dark.png">
-      <img alt="Waveform and spectrogram of the synth_fm Bass demo: a staccato bassline whose bandwidth widens to about 10 kHz and narrows again as the FM index is swept from 0.5 to 6 and back. Click to play." src="docs/media/demo-bass-light.png">
-    </picture>
-  </a>
-</p>
+https://github.com/user-attachments/assets/9f67efe6-2a36-4450-8c1e-e174edcf0ec7
 
-<p>
-  <a href="docs/media/demo-chain.mp3?raw=true">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-chain-dark.png">
-      <img alt="Waveform and spectrogram of synth_fm feeding effect_filter: an FM pad whose upper partials open up and close down as the resonant low-pass cutoff, drawn as a line, sweeps from 180 Hz to 6 kHz and back. Click to play." src="docs/media/demo-chain-light.png">
-    </picture>
-  </a>
-</p>
+**Bass.** The factory Bass preset (ratio 1), with the FM index automated
+0.5 → 6 → 0.5 through `plugin_set_param`.
+[MP3](docs/media/demo-bass.mp3?raw=true)
 
-| Clip | What you're hearing |
-| --- | --- |
-| [Bell](docs/media/demo-bell.mp3?raw=true) | `synth_fm` with its embedded factory **Bell** preset (2-operator FM, ratio 3.5, index 5), playing an arpeggio on the SDK's 8-voice engine. |
-| [Bass](docs/media/demo-bass.mp3?raw=true) | The factory **Bass** preset (ratio 1), with the FM index automated 0.5 → 6 → 0.5 through `plugin_set_param`. |
-| [Synth → filter](docs/media/demo-chain.mp3?raw=true) | Two plugins in series, the same `wire 1 2; wire 2 dac` graph as the shell session: an FM pad into the resonant SVF low-pass, with its cutoff swept 180 Hz → 6 kHz → 180 Hz. |
+https://github.com/user-attachments/assets/808c9d8f-ba5a-4a8e-b516-f6bee7280504
 
-To regenerate every clip and image (needs a host C compiler, ffmpeg, and Python with
-numpy and matplotlib), run `python3 scripts/render_demos.py`. The script contains the
-exact notes and parameter automation for each clip.
+**Synth → filter.** Two plugins in series, the same `wire 1 2; wire 2 dac` graph as
+the shell session: an FM pad into the resonant SVF low-pass, with its cutoff swept
+180 Hz → 6 kHz → 180 Hz.
+[MP3](docs/media/demo-chain.mp3?raw=true)
+
+https://github.com/user-attachments/assets/73a4a4d1-e42f-43f9-9b64-6dab528d7881
+
+To regenerate every clip, image and video (needs a host C compiler, ffmpeg, and Python
+with numpy and matplotlib), run `python3 scripts/render_demos.py`. The script contains
+the exact notes and parameter automation for each clip. GitHub only plays video that
+was uploaded through its web editor, so the players above are uploads of the script's
+`build/demos/*.mp4`.
 
 ---
 
