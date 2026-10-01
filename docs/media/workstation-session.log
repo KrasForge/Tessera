@@ -5,55 +5,58 @@ tessera> load /sd/SYNTH.ELF
 loaded pid 1
 tessera> load /sd/FILTER.ELF
 loaded pid 2
+tessera> load /sd/HOG.ELF
+loaded pid 3
+tessera> load /sd/SOURCE.ELF
+loaded pid 4
 tessera> wire 1 2
 ok
-tessera> wire 2 dac
+tessera> wire 2 3
 ok
-tessera> contract 1 hard 2000us deadline=15000us policy=mute
+tessera> wire 3 dac
 ok
-tessera> contract 2 soft 2000us deadline=18000us policy=bypass
+tessera> wire 2 4
 ok
-tessera> pin 1 1
+tessera> contract 1 hard 4ms deadline=15ms policy=mute
 ok
-tessera> pin 2 2
+tessera> contract 2 hard 16ms deadline=18ms policy=mute
+error: not admitted: pid=2 required_ticks=1266250 available_ticks=1125000
+tessera> contract 2 hard 3ms deadline=18ms policy=mute
 ok
-tessera> set-param 2 0 1200
+tessera> contract 1 soft 4ms deadline=15ms policy=mute
+error: incompatible dependency, rate, or criticality
+tessera> contract 3 soft 2ms deadline=19ms policy=bypass
+ok
+tessera> contract 4 best 5ms period=2blocks policy=degrade skip=2
 ok
 tessera> start
 ok
 tessera> wait 300
 tessera> stats
 audio: frames=300 skipped=0 pause_silence=2
-plugin pid=1 cpu=1 runs=300 completed=300 budget=0 deadline=0 shed=0 killed=0 max_ticks=53611
-plugin pid=2 cpu=2 runs=300 completed=300 budget=0 deadline=0 shed=0 killed=0 max_ticks=65175
-tessera> inspect
-samples: fresh=299 missing=0 hash=3c876fe5 left=28122 right=28122 watchdog=0 swaps=0
-scheduler: accepted=300 skipped=0 invalid=0 last=1 gate=0 frame=302 callback=302
-worker1: sent=302 done=302 blocks=300
-worker2: sent=302 done=302 blocks=300
-worker3: sent=0 done=0 blocks=0
+plugin pid=1 cpu=1 runs=300 completed=300 budget=0 deadline=0 shed=0 killed=0 max_ticks=48935
+plugin pid=2 cpu=1 runs=300 completed=300 budget=0 deadline=0 shed=0 killed=0 max_ticks=28097
+plugin pid=3 cpu=1 runs=299 completed=3 budget=296 deadline=0 shed=0 killed=0 max_ticks=153966
+plugin pid=4 cpu=2 runs=150 completed=150 budget=0 deadline=0 shed=0 killed=0 max_ticks=25551
 tessera> load /sd/CRASH.ELF
-loaded pid 3
-tessera> load /sd/HOG.ELF
-loaded pid 4
-tessera> wire 3 dac
-ok
-tessera> wire 4 dac
+loaded pid 5
+tessera> wire 5 dac
 ok
 tessera> start
 ok
 tessera> wait 300
 tessera> stats
-audio: frames=604 skipped=0 pause_silence=2
-plugin pid=1 cpu=1 runs=604 completed=604 budget=0 deadline=0 shed=0 killed=0 max_ticks=53611
-plugin pid=2 cpu=2 runs=604 completed=604 budget=0 deadline=0 shed=0 killed=0 max_ticks=65175
-plugin pid=3 cpu=1 runs=4 completed=3 budget=0 deadline=0 shed=0 killed=1 max_ticks=34916 fault_cpu=1 esr=2449473606 elr=549755814200 far=0 spsr=1610613568
-plugin pid=4 cpu=2 runs=6 completed=3 budget=3 deadline=0 shed=0 killed=1 max_ticks=186726
+audio: frames=602 skipped=0 pause_silence=2
+plugin pid=1 cpu=1 runs=602 completed=602 budget=0 deadline=0 shed=0 killed=0 max_ticks=48935
+plugin pid=2 cpu=1 runs=602 completed=602 budget=0 deadline=0 shed=0 killed=0 max_ticks=43826
+plugin pid=3 cpu=1 runs=601 completed=3 budget=598 deadline=0 shed=0 killed=0 max_ticks=247860
+plugin pid=4 cpu=2 runs=301 completed=301 budget=0 deadline=0 shed=0 killed=0 max_ticks=25551
+plugin pid=5 cpu=2 runs=4 completed=3 budget=0 deadline=0 shed=0 killed=1 max_ticks=25598 fault_cpu=2 esr=2449473606 elr=549755814200 far=0 spsr=1610613568
 tessera> inspect
-samples: fresh=603 missing=0 hash=7e9eed3b left=-3412 right=-3412 watchdog=0 swaps=4
-scheduler: accepted=604 skipped=0 invalid=0 last=1 gate=0 frame=606 callback=606
-worker1: sent=606 done=606 blocks=604
-worker2: sent=606 done=606 blocks=604
+samples: fresh=601 missing=0 hash=77b6768b left=-17843 right=-17843 watchdog=0 swaps=2
+scheduler: accepted=602 skipped=0 invalid=0 last=1 gate=0 frame=604 callback=604
+worker1: sent=604 done=604 blocks=602
+worker2: sent=604 done=604 blocks=602
 worker3: sent=0 done=0 blocks=0
 tessera> quit
 tessera> WORKSTATION: PASS
