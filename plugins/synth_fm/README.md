@@ -5,6 +5,14 @@ polyphonic voice engine (`tessera_synth`, #113) in two-operator FM mode (#164). 
 proves the synth-voice path end to end and ships two factory presets embedded in
 the ELF (`.tessera.presets`, #127): **Bell** and **Bass**.
 
+## Listen
+
+Rendered by the offline host from this plugin's own C, not recorded from QEMU or a
+board (see [Hear it](../../README.md#hear-it) for exactly how):
+[Bell preset](../../docs/media/demo-bell.mp3?raw=true) ·
+[Bass preset with an FM-index sweep](../../docs/media/demo-bass.mp3?raw=true) ·
+[into `effect_filter`](../../docs/media/demo-chain.mp3?raw=true).
+
 ## Control
 
 Live builds drain note events from the event queue (ABI v1.1). Every build also

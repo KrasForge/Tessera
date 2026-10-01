@@ -1,0 +1,59 @@
+Tessera M11/M13 workstation
+audio format: sample_rate=12000 frames=240
+control: CPU3; audio cadence: CPU0; DSP: CPU1/2
+tessera> load /sd/SYNTH.ELF
+loaded pid 1
+tessera> load /sd/FILTER.ELF
+loaded pid 2
+tessera> wire 1 2
+ok
+tessera> wire 2 dac
+ok
+tessera> contract 1 hard 2000us deadline=15000us policy=mute
+ok
+tessera> contract 2 soft 2000us deadline=18000us policy=bypass
+ok
+tessera> pin 1 1
+ok
+tessera> pin 2 2
+ok
+tessera> set-param 2 0 1200
+ok
+tessera> start
+ok
+tessera> wait 300
+tessera> stats
+audio: frames=300 skipped=0 pause_silence=2
+plugin pid=1 cpu=1 runs=300 completed=300 budget=0 deadline=0 shed=0 killed=0 max_ticks=53611
+plugin pid=2 cpu=2 runs=300 completed=300 budget=0 deadline=0 shed=0 killed=0 max_ticks=65175
+tessera> inspect
+samples: fresh=299 missing=0 hash=3c876fe5 left=28122 right=28122 watchdog=0 swaps=0
+scheduler: accepted=300 skipped=0 invalid=0 last=1 gate=0 frame=302 callback=302
+worker1: sent=302 done=302 blocks=300
+worker2: sent=302 done=302 blocks=300
+worker3: sent=0 done=0 blocks=0
+tessera> load /sd/CRASH.ELF
+loaded pid 3
+tessera> load /sd/HOG.ELF
+loaded pid 4
+tessera> wire 3 dac
+ok
+tessera> wire 4 dac
+ok
+tessera> start
+ok
+tessera> wait 300
+tessera> stats
+audio: frames=604 skipped=0 pause_silence=2
+plugin pid=1 cpu=1 runs=604 completed=604 budget=0 deadline=0 shed=0 killed=0 max_ticks=53611
+plugin pid=2 cpu=2 runs=604 completed=604 budget=0 deadline=0 shed=0 killed=0 max_ticks=65175
+plugin pid=3 cpu=1 runs=4 completed=3 budget=0 deadline=0 shed=0 killed=1 max_ticks=34916 fault_cpu=1 esr=2449473606 elr=549755814200 far=0 spsr=1610613568
+plugin pid=4 cpu=2 runs=6 completed=3 budget=3 deadline=0 shed=0 killed=1 max_ticks=186726
+tessera> inspect
+samples: fresh=603 missing=0 hash=7e9eed3b left=-3412 right=-3412 watchdog=0 swaps=4
+scheduler: accepted=604 skipped=0 invalid=0 last=1 gate=0 frame=606 callback=606
+worker1: sent=606 done=606 blocks=604
+worker2: sent=606 done=606 blocks=604
+worker3: sent=0 done=0 blocks=0
+tessera> quit
+tessera> WORKSTATION: PASS
