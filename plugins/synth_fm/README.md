@@ -5,6 +5,19 @@ polyphonic voice engine (`tessera_synth`, #113) in two-operator FM mode (#164). 
 proves the synth-voice path end to end and ships two factory presets embedded in
 the ELF (`.tessera.presets`, #127): **Bell** and **Bass**.
 
+## Listen
+
+Both factory presets, rendered by the offline host from the automation in
+[`docs/media/demos/`](../../docs/media/demos/) (desktop renders of this source, not a
+hardware recording):
+
+| Preset | Listen | |
+|--------|--------|-|
+| **Bell**: ratio 3.5, index 5 | [MP3](../../docs/media/audio/fm-bell.mp3?raw=true) · [MP4](../../docs/media/audio/fm-bell.mp4?raw=true) | arpeggiated Cmaj7 → Am9 → Fmaj7 → G6 |
+| **Bass**: ratio 1, index 2 | [MP3](../../docs/media/audio/fm-bass.mp3?raw=true) · [MP4](../../docs/media/audio/fm-bass.mp4?raw=true) | sixteenth-note A-minor line, 120 BPM |
+
+![Bell preset spectrogram](../../docs/media/img/fm-bell.png)
+
 ## Control
 
 Live builds drain note events from the event queue (ABI v1.1). Every build also

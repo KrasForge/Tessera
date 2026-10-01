@@ -1,0 +1,46 @@
+Tessera M11/M13 workstation
+audio format: sample_rate=12000 frames=240
+control: CPU3; audio cadence: CPU0; DSP: CPU1/2
+tessera> load /sd/SYNTH.ELF
+loaded pid 1
+tessera> load /sd/GAIN.ELF
+loaded pid 2
+tessera> wire 1 2
+ok
+tessera> wire 2 dac
+ok
+tessera> contract 1 hard 2000us deadline=17000us policy=mute
+ok
+tessera> contract 2 hard 2000us deadline=19500us policy=mute
+ok
+tessera> pin 1 2
+ok
+tessera> pin 2 1
+ok
+tessera> set-param 2 0 0.5
+ok
+tessera> start
+ok
+tessera> wait 128
+tessera> stats
+audio: frames=135 skipped=1 pause_silence=101
+plugin pid=1 cpu=2 runs=134 completed=134 budget=0 deadline=2 shed=1 killed=0 max_ticks=53989
+plugin pid=2 cpu=1 runs=134 completed=133 budget=1 deadline=2 shed=1 killed=0 max_ticks=191457
+tessera> ls
+graph: cores=2 running
+pid=1 /sd/SYNTH.ELF cpu=2 hard budget=125000ticks deadline=1062500ticks period=1250000ticks policy=mute
+pid=2 /sd/GAIN.ELF params: 0=0x3f000000 cpu=1 hard budget=125000ticks deadline=1218750ticks period=1250000ticks policy=mute
+1 -> 2
+2 -> dac
+tessera> inspect
+samples: fresh=140 missing=1 hash=7af84641 left=9759 right=9759 watchdog=0 swaps=0
+scheduler: accepted=141 skipped=1 invalid=0 last=1 gate=0 frame=243 callback=243
+worker1: sent=243 done=243 blocks=141
+worker2: sent=243 done=243 blocks=141
+worker3: sent=0 done=0 blocks=0
+tessera> patch save /sd/LIVE.TSP
+ok
+tessera> patch ls
+patches:
+  LIVE.TSP
+tessera> 

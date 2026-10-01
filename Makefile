@@ -1459,6 +1459,12 @@ offline-host: | $(ARM_BUILD_DIR)
 	$(CC) -std=c11 -Wall -Wextra -g -O2 -Iinclude $(ARM_OFFLINE_SRCS) \
 	      -o $(ARM_BUILD_DIR)/offline_host -lm
 
+# README sound demos: render the reference plugins through the offline host to
+# docs/media (MP3, spectrogram PNG, MP4).  Needs ffmpeg and numpy/matplotlib.
+.PHONY: render-demos
+render-demos:
+	python3 scripts/render_demos.py
+
 test-arm-offline-host: | $(ARM_BUILD_DIR)
 	$(CC) -std=c11 -Wall -Wextra -g -O1 -fsanitize=address,undefined \
 	      -Iinclude $(ARM_OFFLINE_SRCS) -o $(ARM_BUILD_DIR)/offline_host -lm

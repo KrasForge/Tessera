@@ -1,0 +1,196 @@
+=== QEMU virt resilience demo (issue #36 + #79) ===
+hog budget: 1333us of a 5333us block (fair share of 4)
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=2 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=3 (evil)
+  [budget] kill pid=4 (hog) after 3 consecutive offences (max=1678us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=5 (evil) on write access
+  run 1: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=7 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=8 (evil)
+  [budget] kill pid=9 (hog) after 3 consecutive offences (max=1484us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=10 (evil) on write access
+  run 2: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=12 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=13 (evil)
+  [budget] kill pid=14 (hog) after 3 consecutive offences (max=1514us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=15 (evil) on write access
+  run 3: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=17 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=18 (evil)
+  [budget] kill pid=19 (hog) after 3 consecutive offences (max=1449us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=20 (evil) on write access
+  run 4: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=22 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=23 (evil)
+  [budget] kill pid=24 (hog) after 3 consecutive offences (max=1477us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=25 (evil) on write access
+  run 5: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=27 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=28 (evil)
+  [budget] kill pid=29 (hog) after 3 consecutive offences (max=1502us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=30 (evil) on write access
+  run 6: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=32 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=33 (evil)
+  [budget] kill pid=34 (hog) after 3 consecutive offences (max=1535us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=35 (evil) on write access
+  run 7: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=37 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=38 (evil)
+  [budget] kill pid=39 (hog) after 3 consecutive offences (max=1476us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=40 (evil) on write access
+  run 8: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=42 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=43 (evil)
+  [budget] kill pid=44 (hog) after 3 consecutive offences (max=1543us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=45 (evil) on write access
+  run 9: good-audio-intact + all-three-neutralised = yes
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000046  ELR=0x0000008000000028
+  FAR=0x0000000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=47 (crash) on write access
+  [sandbox] illegal SVC #1 from pid=48 (evil)
+  [budget] kill pid=49 (hog) after 3 consecutive offences (max=1474us budget=1333us) dead=1 mute-leaks=0
+
+[exception] memory fault
+  vector : EL0 sync
+  cause  : data abort (EL0) (EC=0x24)
+  ESR=0x0000000092000044  ELR=0x0000008000000044
+  FAR=0xffff000000000000  SPSR=0x00000000000003c0
+  -> terminating EL0 process
+  [fault] terminating EL0 process pid=50 (evil) on write access
+  run 10: good-audio-intact + all-three-neutralised = yes
+leak: baseline=32122 after-10x=32122 no-leak=1
+checks: passes=10/10 no-leak=1
+RESILIENCE: PASS
+QEMU virt resilience demo PASSED

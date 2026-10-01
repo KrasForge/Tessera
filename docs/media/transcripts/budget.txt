@@ -1,0 +1,14 @@
+=== QEMU virt CPU-budget enforcement (issue #78) ===
+PSCI CPU_ON: worker=0 online=1 budgets: set=0,0 fair=333us hard=250us
+plugin_time: pid=1 (good) runs=100 min=88us max=254us mean=89us overruns=0 offences=0
+plugin_time: pid=2 (blip) runs=100 min=41us max=305us mean=48us overruns=0 offences=2
+plugin_time: pid=3 (hog) runs=100 min=0us max=305us mean=10us overruns=0 offences=3
+  [budget] kill pid=3 (hog) offences=3 max=259us budget=250us dead=1
+audio: serviced=100 underruns=0 overruns=0 worst=402 cyc
+worker: kicks=100 blocks=100 overruns=0
+good: runs=100 audible=100 offences=0 muted=0 killed=0
+blip: runs=100 audible=98 offences=2 muted=2 killed=0 preempt=[259,259]us
+hog: runs=6 offences=3 muted=3 killed=1 preempt=[259,259]us
+leak: baseline=32130 after=32130 no-leak=1
+checks: online=1 ctl=1 cpu0=1 worker=1 hog=1 blip=1 good=1 preempt=1 no-leak=1
+BUDGET: PASS

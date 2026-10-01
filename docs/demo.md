@@ -18,6 +18,8 @@ same target. Failure is not hidden behind allowances for missed blocks.
 
 ## Four-plugin resilience and resource lifecycle
 
+![Resilience gate transcript](media/img/fault-containment.png)
+
 ```sh
 make test-arm-resilience-qemu CROSS_COMPILE=aarch64-linux-gnu-
 ```
@@ -56,6 +58,8 @@ RESILIENCE: PASS
 ```
 
 ## Concurrent audio cadence and transient recovery
+
+![Budget gate transcript](media/img/budget-enforcement.png)
 
 ```sh
 make test-arm-budget-qemu CROSS_COMPILE=aarch64-linux-gnu-

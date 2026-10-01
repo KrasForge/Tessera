@@ -16,6 +16,16 @@ the ELF (#127): **Normal** and **OctaveUp**.
 In a real deployment the sample would be streamed from the SD card by the host;
 here it is a small embedded waveform so the plugin is self-contained.
 
+## Listen
+
+The bundled waveform is a 512-sample, two-cycle decaying sine, so looped it is a
+buzzy test tone rather than a musical sample. The demo steps the pitch ratio
+1.0 → 2.0 → 0.75 → 1.5 with short gate gaps
+([MP3](../../docs/media/audio/sampler-pitch.mp3?raw=true) ·
+[MP4](../../docs/media/audio/sampler-pitch.mp4?raw=true)):
+
+![Sampler pitch-step spectrogram](../../docs/media/img/sampler-pitch.png)
+
 ## Build / test
 
 - `make test-arm-ref-sampler` — drives it through the C ABI, checks it plays and

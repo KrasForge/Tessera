@@ -18,13 +18,65 @@ plugin SDK (C and Rust) and a library of allocation-free DSP blocks for plugin a
 
 ---
 
+## See it, hear it
+
+### Three hostile plugins, one surviving instrument
+
+![Resilience gate: a NULL-dereferencing plugin, an illegal-SVC plugin and a CPU hog are each killed while the good plugin keeps producing audio, ten cycles in a row with no memory leak](docs/media/img/fault-containment.png)
+
+`make test-arm-resilience-qemu`: four real EL0 plugins on QEMU `virt`. `crash`
+dereferences NULL, `evil` issues a forbidden `SVC` (and a second instance attempts a
+wild kernel write), and `hog` spins forever inside `process_block`. Each one is killed by the kernel's
+real exception or timer path while `good` keeps rendering its sine. The test repeats
+this ten times and requires the frame allocator to return to its baseline every time.
+The full log is in [`docs/media/transcripts/resilience.txt`](docs/media/transcripts/resilience.txt).
+
+<details>
+<summary>CPU-budget preemption: a plugin that overruns is muted, then killed, while audio keeps its cadence</summary>
+
+![Budget gate: 100/100 callbacks serviced, zero underruns; blip is muted twice and recovers, hog is killed after three strikes](docs/media/img/budget-enforcement.png)
+
+`make test-arm-budget-qemu`. Full log:
+[`docs/media/transcripts/budget.txt`](docs/media/transcripts/budget.txt).
+</details>
+
+### Building a graph live from the serial shell
+
+![Tessera workstation session: loading SYNTH.ELF and GAIN.ELF, wiring them to the DAC, setting real-time contracts and core pinning, starting the graph, and saving the patch](docs/media/img/workstation-session.png)
+
+`make run-arm-workstation`, driven over the PL011 console. This capture was built with
+the 12 kHz / 240-sample QEMU functional profile the acceptance tests use (see
+[Verification](#verification)). The single skipped frame and budget offence right
+after `start` were recorded under emulation, which is why QEMU numbers are never
+treated as hardware timing evidence. Full log:
+[`docs/media/transcripts/workstation-session.txt`](docs/media/transcripts/workstation-session.txt).
+
+### Sound demos
+
+These are rendered on a desktop by the [offline host](tools/offline_host.c). It links
+the **same plugin C sources** that become the EL0 ELFs and drives them through the
+plugin ABI, block by block. They are not recordings of a Pi: no Tessera audio has gone
+through a physical DAC yet (see [Road to hardware](#road-to-hardware)). Each demo's note
+and parameter automation is committed in [`docs/media/demos/`](docs/media/demos/), and
+`make render-demos` regenerates every file in this section.
+
+| Demo | Listen | What you hear |
+| --- | --- | --- |
+| [![FM bell spectrogram](docs/media/img/fm-bell.png)](docs/media/audio/fm-bell.mp4?raw=true) | [MP3](docs/media/audio/fm-bell.mp3?raw=true) · [MP4](docs/media/audio/fm-bell.mp4?raw=true) | [`synth_fm`](plugins/synth_fm) **Bell** preset (FM ratio 3.5, index 5) arpeggiating Cmaj7 → Am9 → Fmaj7 → G6 over the SDK's 8-voice polyphonic engine. |
+| [![FM bass spectrogram](docs/media/img/fm-bass.png)](docs/media/audio/fm-bass.mp4?raw=true) | [MP3](docs/media/audio/fm-bass.mp3?raw=true) · [MP4](docs/media/audio/fm-bass.mp4?raw=true) | `synth_fm` **Bass** preset (ratio 1, index 2): a sixteenth-note A-minor line at 120 BPM. |
+| [![Filter sweep spectrogram](docs/media/img/fm-bass-filter-sweep.png)](docs/media/audio/fm-bass-filter-sweep.mp4?raw=true) | [MP3](docs/media/audio/fm-bass-filter-sweep.mp3?raw=true) · [MP4](docs/media/audio/fm-bass-filter-sweep.mp4?raw=true) | The bass line chained into [`effect_filter`](plugins/effect_filter), a resonant state-variable low-pass (Q 6) with its cutoff swept 150 Hz → 5 kHz → 150 Hz by live `set_param` calls. This is the `synth → filter → dac` graph from the shell tests. |
+
+The MP4s show the spectrogram with a moving playhead.
+
+---
+
 ## Status at a glance
 
 | Question | Answer |
 | --- | --- |
 | Does it run? | **Yes, under QEMU `virt`** (4× Cortex-A72, MMU on, real exception vectors, real EL0 plugins). |
 | Does it run on a Raspberry Pi / CM4? | **Not yet.** Nothing has been validated on real BCM2711 silicon. That work is tracked in [#105](https://github.com/KrasForge/Tessera/issues/105)–[#108](https://github.com/KrasForge/Tessera/issues/108). |
-| Can I hear it? | **No.** QEMU doesn't emulate the BCM2711 I2S block. The emulated workstation renders PCM into memory, and tests check it by sample value and hash. Nothing plays through speakers. |
+| Can I hear it? | **The plugins, yes. The device, not yet.** The [sound demos](#sound-demos) are offline renders of the real plugin code. QEMU doesn't emulate the BCM2711 I2S block, so the emulated workstation renders PCM into memory, and tests check it by sample value and hash. Nothing has played through a DAC yet. |
 | Is the isolation real? | **Yes.** Each plugin gets its own translation tables, runs at EL0, and is preempted by the timer. Faults are handled by the kernel's real exception path, and QEMU tests exercise every fault class. |
 | Is it a product? | **No.** It's a working, heavily tested architecture in emulation. It isn't a finished pedal, and it makes no claims about measured hardware latency. |
 
@@ -200,6 +252,16 @@ make test-arm-sdk-qemu CROSS_COMPILE=aarch64-linux-gnu-
 This builds a plugin with only the SDK, boots Tessera, loads the plugin into an isolated
 EL0 process, and checks its audio output and parameter control.
 
+### Render the sound demos
+
+```sh
+pip install numpy matplotlib   # plus ffmpeg from your package manager
+make render-demos
+```
+
+This renders the reference plugins through the offline host into `docs/media/`. No
+cross-toolchain or QEMU is needed.
+
 ### Build the Pi image
 
 ```sh
@@ -270,6 +332,7 @@ tests/        host unit suites, QEMU virt fixtures, golden-audio references
 tools/        offline WAV plugin host, golden-audio checker
 scripts/      QEMU timing and workstation acceptance runners
 docs/         ABI, shell, temporal model, reliability, hardware, and verification notes
+docs/media/   README screenshots, sound demos, and the QEMU transcripts behind them
 ```
 
 ## Documentation
@@ -279,6 +342,7 @@ docs/         ABI, shell, temporal model, reliability, hardware, and verificatio
 - **Serial workstation:** [`docs/shell.md`](docs/shell.md), [`docs/m11-m13-workstation.md`](docs/m11-m13-workstation.md)
 - **Temporal contracts:** [`docs/temporal-contracts.md`](docs/temporal-contracts.md)
 - **Fault containment demo:** [`docs/demo.md`](docs/demo.md)
+- **Screenshots and sound demos (provenance, how to regenerate):** [`docs/media/README.md`](docs/media/README.md)
 - **Reliability mechanisms:** [`docs/reliability.md`](docs/reliability.md)
 - **Signal I/O, transport, control:** [`docs/signal-io.md`](docs/signal-io.md), [`docs/transport.md`](docs/transport.md), [`docs/control-surface.md`](docs/control-surface.md)
 - **Latency methodology:** [`docs/latency.md`](docs/latency.md)

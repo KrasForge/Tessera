@@ -30,6 +30,16 @@ static state, with no allocation, no locks, and no syscalls.
 touch the filter state, so changing the cutoff in real time is click-free
 apart from the filter's own transient.
 
+## Listen
+
+The `synth_fm` Bass line run through this filter at Q 6, with `plugin_set_param(0, …)`
+sweeping the cutoff 150 Hz → 5 kHz → 150 Hz. Rendered by the offline host
+([MP3](../../docs/media/audio/fm-bass-filter-sweep.mp3?raw=true) ·
+[MP4](../../docs/media/audio/fm-bass-filter-sweep.mp4?raw=true); dry input:
+[MP3](../../docs/media/audio/fm-bass.mp3?raw=true)):
+
+![Resonant low-pass sweep spectrogram](../../docs/media/img/fm-bass-filter-sweep.png)
+
 ## Build
 
 ```
