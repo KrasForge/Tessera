@@ -72,25 +72,36 @@ These clips come from the in-tree reference plugins
 by the [offline host](tools/offline_host.c). The offline host compiles the plugin's own C
 for the desktop and drives it through the same ABI entry points the kernel calls
 (`plugin_init`, `plugin_set_param`, `plugin_process_block`), block by block, from an
-automation script. They were **not** recorded from QEMU or
-from a board. After rendering, each clip was only normalised to −1 dBFS peak and
-encoded to MP3. There is no EQ, compression, reverb, or mixing. Click a spectrogram to
-play its clip.
+automation script. They were **not** recorded from QEMU or from a board. After
+rendering, each clip was only normalised to −1 dBFS peak and encoded to MP3. There is
+no EQ, compression, reverb, or mixing. Click a spectrogram to play its clip.
 
-<a href="docs/media/demo-bell.mp3?raw=true"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-bell-dark.png">
-  <img alt="Waveform and spectrogram of the synth_fm Bell demo: an Am-F-C-G arpeggio with bright, inharmonic FM partials reaching well above 10 kHz. Click to play." src="docs/media/demo-bell-light.png">
-</picture></a>
+<p>
+  <a href="docs/media/demo-bell.mp3?raw=true">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-bell-dark.png">
+      <img alt="Waveform and spectrogram of the synth_fm Bell demo: an Am-F-C-G arpeggio with bright, inharmonic FM partials reaching well above 10 kHz. Click to play." src="docs/media/demo-bell-light.png">
+    </picture>
+  </a>
+</p>
 
-<a href="docs/media/demo-bass.mp3?raw=true"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-bass-dark.png">
-  <img alt="Waveform and spectrogram of the synth_fm Bass demo: a staccato bassline whose bandwidth widens to about 10 kHz and narrows again as the FM index is swept from 0.5 to 6 and back. Click to play." src="docs/media/demo-bass-light.png">
-</picture></a>
+<p>
+  <a href="docs/media/demo-bass.mp3?raw=true">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-bass-dark.png">
+      <img alt="Waveform and spectrogram of the synth_fm Bass demo: a staccato bassline whose bandwidth widens to about 10 kHz and narrows again as the FM index is swept from 0.5 to 6 and back. Click to play." src="docs/media/demo-bass-light.png">
+    </picture>
+  </a>
+</p>
 
-<a href="docs/media/demo-chain.mp3?raw=true"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-chain-dark.png">
-  <img alt="Waveform and spectrogram of synth_fm feeding effect_filter: an FM pad whose upper partials open up and close down as the resonant low-pass cutoff, drawn as a line, sweeps from 180 Hz to 6 kHz and back. Click to play." src="docs/media/demo-chain-light.png">
-</picture></a>
+<p>
+  <a href="docs/media/demo-chain.mp3?raw=true">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-chain-dark.png">
+      <img alt="Waveform and spectrogram of synth_fm feeding effect_filter: an FM pad whose upper partials open up and close down as the resonant low-pass cutoff, drawn as a line, sweeps from 180 Hz to 6 kHz and back. Click to play." src="docs/media/demo-chain-light.png">
+    </picture>
+  </a>
+</p>
 
 | Clip | What you're hearing |
 | --- | --- |
