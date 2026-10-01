@@ -8,14 +8,18 @@ does. This is the desktop path, not QEMU and not hardware: QEMU has no I2S
 block, and nothing here was recorded from a board.
 
 After the offline host writes its 16-bit WAV, the only processing is one fixed
-gain to -1 dBFS peak and MP3 encoding. There is no EQ, compression, reverb or
-mixing. The synth -> filter demo is two offline-host passes, exactly the
+gain to -1 dBFS peak and MP3 / AAC encoding. There is no EQ, compression, reverb
+or mixing. The synth -> filter demo is two offline-host passes, exactly the
 `wire 1 2; wire 2 dac` graph from the shell.
 
 Needs a host C compiler, ffmpeg with libmp3lame, and Python 3 with numpy and
 matplotlib.
 
     python3 scripts/render_demos.py     # -> docs/media/demo-*.mp3 and *.png
+
+It also writes build/demos/demo-*.mp4: the dark spectrogram with a moving
+playhead over the same audio. GitHub only plays video inline when it is uploaded
+through its web editor (a user-attachments URL), so those are for uploading.
 """
 from __future__ import annotations
 
@@ -29,6 +33,10 @@ import numpy as np
 
 SR = 48000
 ROOT = Path(__file__).resolve().parent.parent
+
+# Figure geometry, shared by the spectrogram plot and the playhead video.
+FIG_W, FIG_H, DPI = 8, 3.1, 200
+LEFT, RIGHT, TOP, BOTTOM = 0.075, 0.985, 0.80, 0.14
 
 # synth_fm parameter ids (plugins/synth_fm/main.c)
 NOTE_ON, NOTE_OFF, FM_RATIO, FM_INDEX, ATTACK, DECAY, SUSTAIN, RELEASE = range(8)
@@ -159,6 +167,22 @@ def encode_mp3(wav: Path, mp3: Path) -> float:
     return gain_db
 
 
+def encode_video(wav: Path, png: Path, mp4: Path, gain_db: float, seconds: float) -> None:
+    """The spectrogram image with a playhead sweeping its time axis, over the clip."""
+    w, h = round(FIG_W * DPI), round(FIG_H * DPI)
+    x0, span = LEFT * w, (RIGHT - LEFT) * w
+    y0, y1 = round((1 - TOP) * h), round((1 - BOTTOM) * h)
+    graph = (f"color=c=white@0.85:s=3x{y1 - y0}:r=30,format=rgba[head];"
+             f"[0:v][head]overlay=x='{x0:.1f}+{span:.1f}*t/{seconds:.4f}':y={y0},"
+             f"format=yuv420p[v];"
+             f"[1:a]volume={gain_db:.2f}dB,aformat=channel_layouts=mono[a]")
+    run(["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-framerate", "30",
+         "-i", str(png), "-i", str(wav), "-filter_complex", graph,
+         "-map", "[v]", "-map", "[a]", "-t", f"{seconds:.4f}",
+         "-c:v", "libx264", "-preset", "slow", "-crf", "26", "-c:a", "aac", "-b:a", "160k",
+         "-movflags", "+faststart", "-map_metadata", "-1", str(mp4)])
+
+
 THEMES = {
     # Surfaces and ink from the dataviz reference palette; the spectrogram is a
     # one-hue (blue) sequential ramp that recedes toward each theme's surface.
@@ -182,9 +206,9 @@ def plot(audio: np.ndarray, title: str, subtitle: str, out: Path, theme: str,
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 8,
                          "axes.edgecolor": th["grid"], "axes.labelcolor": th["muted"],
                          "xtick.color": th["muted"], "ytick.color": th["muted"]})
-    fig = plt.figure(figsize=(8, 3.1), dpi=200, facecolor=th["surface"])
+    fig = plt.figure(figsize=(FIG_W, FIG_H), dpi=DPI, facecolor=th["surface"])
     gs = fig.add_gridspec(2, 1, height_ratios=[1, 3], hspace=0.08,
-                          left=0.075, right=0.985, top=0.80, bottom=0.14)
+                          left=LEFT, right=RIGHT, top=TOP, bottom=BOTTOM)
     ax_w, ax_s = fig.add_subplot(gs[0]), fig.add_subplot(gs[1])
     dur = len(audio) / SR
 
@@ -233,8 +257,8 @@ def plot(audio: np.ndarray, title: str, subtitle: str, out: Path, theme: str,
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
 
-    fig.text(0.075, 0.93, title, color=th["ink"], fontsize=10.5, fontweight="bold")
-    fig.text(0.075, 0.855, subtitle, color=th["muted"], fontsize=8)
+    fig.text(LEFT, 0.93, title, color=th["ink"], fontsize=10.5, fontweight="bold")
+    fig.text(LEFT, 0.855, subtitle, color=th["muted"], fontsize=8)
     fig.savefig(out, facecolor=th["surface"])
     plt.close(fig)
     # 256-colour palette PNG: visually identical here, about a fifth of the size.
@@ -285,7 +309,10 @@ def main() -> None:
         audio = read_wav(wav)
         for theme in THEMES:
             plot(audio, title, subtitle, args.out / f"{name}-{theme}.png", theme, cutoff)
-        print(f"{name}: {len(audio) / SR:.1f} s, gain {gain:+.1f} dB -> {args.out / name}.mp3")
+        encode_video(wav, args.out / f"{name}-dark.png", args.work / f"{name}.mp4", gain,
+                     len(audio) / SR)
+        print(f"{name}: {len(audio) / SR:.1f} s, gain {gain:+.1f} dB -> {args.out / name}.mp3,"
+              f" {args.work / name}.mp4")
 
 
 if __name__ == "__main__":
