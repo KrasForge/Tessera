@@ -24,9 +24,83 @@ plugin SDK (C and Rust) and a library of allocation-free DSP blocks for plugin a
 | --- | --- |
 | Does it run? | **Yes, under QEMU `virt`** (4× Cortex-A72, MMU on, real exception vectors, real EL0 plugins). |
 | Does it run on a Raspberry Pi / CM4? | **Not yet.** Nothing has been validated on real BCM2711 silicon. That work is tracked in [#105](https://github.com/KrasForge/Tessera/issues/105)–[#108](https://github.com/KrasForge/Tessera/issues/108). |
-| Can I hear it? | **No.** QEMU doesn't emulate the BCM2711 I2S block. The emulated workstation renders PCM into memory, and tests check it by sample value and hash. Nothing plays through speakers. |
+| Can I hear it? | **Not from QEMU, and not from a board yet.** QEMU doesn't emulate the BCM2711 I2S block. The emulated workstation renders PCM into memory, and tests check it by sample value and hash. What you *can* hear is the reference plugins' own DSP, rendered on a desktop by the offline host: see [Hear it](#hear-it). |
 | Is the isolation real? | **Yes.** Each plugin gets its own translation tables, runs at EL0, and is preempted by the timer. Faults are handled by the kernel's real exception path, and QEMU tests exercise every fault class. |
 | Is it a product? | **No.** It's a working, heavily tested architecture in emulation. It isn't a finished pedal, and it makes no claims about measured hardware latency. |
+
+---
+
+## See it
+
+### A live graph from the serial shell
+
+![A Tessera serial-console session under QEMU: two plugins are loaded from the FAT volume, wired synth to filter to DAC, given temporal contracts, pinned to worker cores and started. stats then shows both completing 300 of 300 blocks with no skipped frames.](docs/media/shell-session.png)
+
+The integrated 4-core image under QEMU, driven over its PL011 serial console. Two
+plugins are loaded from the FAT volume into their own EL0 address spaces, wired
+synth → low-pass → DAC, given temporal contracts, pinned to worker cores, and started.
+After 300 frames both have completed every block and the DAC has missed none.
+(`SYNTH.ELF` in this image is the 440 Hz sine test plugin.)
+
+### Fault containment, live
+
+![The same session continued: a crashing plugin and a CPU-hog plugin are loaded and wired into the running graph. stats shows both killed (killed=1), the crash with its fault record, while the synth and filter keep completing every block: 604 of 604, with zero skipped frames.](docs/media/fault-containment.png)
+
+The same session, still running. `CRASH.ELF` writes through a NULL pointer on its
+fourth block, and `HOG.ELF` renders three blocks and then spins forever inside
+`process_block`. The kernel records the crash (`esr=2449473606` is 0x92000046, a data
+abort from EL0 on a write; `far=0` is the NULL address) and kills it. The generic timer preempts the
+hog on three consecutive blocks (`budget=3`), and then the hog is killed too. Synth and
+filter never notice: 604 of 604 blocks completed, zero skipped frames, and nothing
+missing at the DAC.
+
+Both screenshots are one unedited session
+([raw log](docs/media/workstation-session.log)), captured with the 12 kHz / 240-sample
+(20 ms) frame profile that the console acceptance test uses, so host-vCPU
+descheduling isn't mistaken for a deadline miss (see [Verification](#verification)).
+To reproduce it, type the same commands into:
+
+```sh
+make run-arm-workstation CROSS_COMPILE=aarch64-linux-gnu- \
+     SESSION_DEFS="-DSESSION_FRAMES=240 -DSESSION_RATE=12000"
+```
+
+## Hear it
+
+These clips come from the in-tree reference plugins
+([`synth_fm`](plugins/synth_fm), [`effect_filter`](plugins/effect_filter)), rendered
+by the [offline host](tools/offline_host.c). The offline host compiles the plugin's own C
+for the desktop and drives it through the same ABI entry points the kernel calls
+(`plugin_init`, `plugin_set_param`, `plugin_process_block`), block by block, from an
+automation script. They were **not** recorded from QEMU or
+from a board. After rendering, each clip was only normalised to −1 dBFS peak and
+encoded to MP3. There is no EQ, compression, reverb, or mixing. Click a spectrogram to
+play its clip.
+
+<a href="docs/media/demo-bell.mp3?raw=true"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-bell-dark.png">
+  <img alt="Waveform and spectrogram of the synth_fm Bell demo: an Am-F-C-G arpeggio with bright, inharmonic FM partials reaching well above 10 kHz. Click to play." src="docs/media/demo-bell-light.png">
+</picture></a>
+
+<a href="docs/media/demo-bass.mp3?raw=true"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-bass-dark.png">
+  <img alt="Waveform and spectrogram of the synth_fm Bass demo: a staccato bassline whose bandwidth widens to about 10 kHz and narrows again as the FM index is swept from 0.5 to 6 and back. Click to play." src="docs/media/demo-bass-light.png">
+</picture></a>
+
+<a href="docs/media/demo-chain.mp3?raw=true"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/demo-chain-dark.png">
+  <img alt="Waveform and spectrogram of synth_fm feeding effect_filter: an FM pad whose upper partials open up and close down as the resonant low-pass cutoff, drawn as a line, sweeps from 180 Hz to 6 kHz and back. Click to play." src="docs/media/demo-chain-light.png">
+</picture></a>
+
+| Clip | What you're hearing |
+| --- | --- |
+| [Bell](docs/media/demo-bell.mp3?raw=true) | `synth_fm` with its embedded factory **Bell** preset (2-operator FM, ratio 3.5, index 5), playing an arpeggio on the SDK's 8-voice engine. |
+| [Bass](docs/media/demo-bass.mp3?raw=true) | The factory **Bass** preset (ratio 1), with the FM index automated 0.5 → 6 → 0.5 through `plugin_set_param`. |
+| [Synth → filter](docs/media/demo-chain.mp3?raw=true) | Two plugins in series, the same `wire 1 2; wire 2 dac` graph as the shell session: an FM pad into the resonant SVF low-pass, with its cutoff swept 180 Hz → 6 kHz → 180 Hz. |
+
+To regenerate every clip and image (needs a host C compiler, ffmpeg, and Python with
+numpy and matplotlib), run `python3 scripts/render_demos.py`. The script contains the
+exact notes and parameter automation for each clip.
 
 ---
 
@@ -268,8 +342,9 @@ plugins/      reference plugins (synth, sampler, filter, gain…) and adversaria
 sdk/          standalone plugin SDK, DSP library, C example, Rust wrapper
 tests/        host unit suites, QEMU virt fixtures, golden-audio references
 tools/        offline WAV plugin host, golden-audio checker
-scripts/      QEMU timing and workstation acceptance runners
-docs/         ABI, shell, temporal model, reliability, hardware, and verification notes
+scripts/      QEMU timing and workstation acceptance runners, README demo renderer
+docs/         ABI, shell, temporal model, reliability, hardware, and verification notes;
+              docs/media/ holds the README screenshots, session log, and audio clips
 ```
 
 ## Documentation
